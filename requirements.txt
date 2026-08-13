@@ -1,0 +1,5 @@
+alpaca-py>=0.40.0
+pandas>=2.2.0
+numpy>=1.26.0
+python-dotenv>=1.0.1
+colorama>=0.4.6
