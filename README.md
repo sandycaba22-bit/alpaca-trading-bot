@@ -22,6 +22,16 @@ python main.py
 
 `DRY_RUN=true` registra órdenes sin enviarlas. Pon `DRY_RUN=false` para ejecutar en paper.
 
+## Panel web
+
+```bash
+cd web
+npm install
+npm start
+```
+
+Abre `http://127.0.0.1:3000`. Configura `SESSION_SECRET`, `ADMIN_USER` y `ADMIN_PASS` en `.env`. El dashboard está fuera de `public/` y exige sesión.
+
 ## Estructura
 
 ```

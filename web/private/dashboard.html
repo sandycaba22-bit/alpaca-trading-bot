@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | Bot Alpaca</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <main class="shell">
+        <div class="top">
+            <div>
+                <p class="eyebrow">Sesion autenticada</p>
+                <h1>Dashboard paper trading</h1>
+            </div>
+            <a class="btn" href="/api/logout">Cerrar sesion</a>
+        </div>
+        <p id="status-msg" class="muted">Cargando estado de Alpaca...</p>
+        <section class="grid" id="metrics"></section>
+        <h2>Posiciones</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Ticker</th>
+                    <th>Estado</th>
+                    <th>P&amp;L $</th>
+                    <th>P&amp;L %</th>
+                    <th>Invertido</th>
+                    <th>Entry / Last</th>
+                </tr>
+            </thead>
+            <tbody id="rows">
+                <tr><td colspan="6" class="muted">Sin datos</td></tr>
+            </tbody>
+        </table>
+    </main>
+    <script>
+        function money(n) {
+            return Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+        }
+        function colorClass(name) {
+            if (name === 'VERDE') return 'verde';
+            if (name === 'ROJO') return 'rojo';
+            return 'neutro';
+        }
+        async function loadStatus() {
+            const msg = document.getElementById('status-msg');
+            const res = await fetch('/api/status', { credentials: 'same-origin' });
+            if (res.status === 401) {
+                window.location.href = '/login.html';
+                return;
+            }
+            if (!res.ok) {
+                msg.textContent = 'No se pudo obtener el estado de la cuenta.';
+                return;
+            }
+            const data = await res.json();
+            msg.textContent = data.market_open
+                ? 'Mercado abierto | paper=' + data.paper + ' | dry_run=' + data.dry_run
+                : 'Mercado cerrado | proxima apertura ' + (data.next_open || 'n/a');
+            document.getElementById('metrics').innerHTML = [
+                ['Equity', money(data.equity)],
+                ['Cash', money(data.cash)],
+                ['Buying power', money(data.buying_power)],
+                ['SL / TP', (data.stop_loss_pct * 100).toFixed(1) + '% / ' + (data.take_profit_pct * 100).toFixed(1) + '%'],
+                ['Simbolos', (data.symbols || []).join(', ')]
+            ].map(([k, v]) => '<div class="metric"><span>' + k + '</span><strong>' + v + '</strong></div>').join('');
+            const rows = document.getElementById('rows');
+            if (!data.positions || !data.positions.length) {
+                rows.innerHTML = '<tr><td colspan="6" class="muted">No hay posiciones abiertas</td></tr>';
+                return;
+            }
+            rows.innerHTML = data.positions.map((p) => {
+                const sign = p.pnl_abs >= 0 ? '+' : '';
+                return '<tr>' +
+                    '<td>' + p.symbol + '</td>' +
+                    '<td class="' + colorClass(p.color) + '">' + p.color + '</td>' +
+                    '<td class="' + colorClass(p.color) + '">' + sign + money(p.pnl_abs) + '</td>' +
+                    '<td class="' + colorClass(p.color) + '">' + sign + p.pnl_pct.toFixed(2) + '%</td>' +
+                    '<td>' + money(p.invested) + '</td>' +
+                    '<td>' + p.entry + ' / ' + p.last + '</td>' +
+                    '</tr>';
+            }).join('');
+        }
+        loadStatus();
+    </script>
+</body>
+</html>
