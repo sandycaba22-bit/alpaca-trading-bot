@@ -3,21 +3,77 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard | Bot Alpaca</title>
+    <title>Dashboard | Bot Alpaca Paper</title>
     <link rel="stylesheet" href="/styles.css">
+    <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
     <main class="shell">
         <div class="top">
             <div>
-                <p class="eyebrow">Sesion autenticada</p>
-                <h1>Dashboard paper trading</h1>
+                <p class="eyebrow">Paper trading · no dinero real</p>
+                <h1>Panel de administracion</h1>
             </div>
-            <a class="btn" href="/api/logout">Cerrar sesion</a>
+            <div class="actions">
+                <a class="btn btn-ghost" href="/api/logout">Cerrar sesion</a>
+            </div>
         </div>
-        <p id="status-msg" class="muted">Cargando estado de Alpaca...</p>
+
+        <section class="control-panel" aria-live="polite">
+            <div id="bot-badge" class="bot-badge bot-badge--loading">
+                <span class="bot-badge__dot" aria-hidden="true"></span>
+                <span id="bot-badge-text">ESTADO: CARGANDO...</span>
+            </div>
+            <button id="toggle-bot" type="button" class="power-btn power-btn--loading" disabled>
+                <span class="power-btn__icon" id="toggle-icon" aria-hidden="true">⏳</span>
+                <span id="toggle-label">Conectando...</span>
+            </button>
+            <p id="control-error" class="control-error" role="alert"></p>
+            <div id="control-meta" class="control-meta"></div>
+        </section>
+
         <section class="grid" id="metrics"></section>
-        <h2>Posiciones</h2>
+        <div id="scheduler-layers" class="scheduler-layers muted">Ciclos Tesla 3-6-9: esperando datos del bot...</div>
+        <p id="refresh-msg" class="muted refresh-msg">Sincronizacion automatica cada 15 min · deteccion de cambio de mercado cada 60 s</p>
+        <p id="strategy-msg" class="muted"></p>
+
+        <div class="chart-head">
+            <h2 id="chart-title">Velas</h2>
+            <div class="chart-controls">
+                <label for="symbol-select">Simbolo</label>
+                <select id="symbol-select"></select>
+                <label for="tf-select">Velas</label>
+                <select id="tf-select">
+                    <option value="6Min">6 min (Tesla)</option>
+                    <option value="9Min">9 min (Tesla)</option>
+                    <option value="15Min" selected>15 min</option>
+                    <option value="1Hour">1 hora</option>
+                    <option value="1Day">1 dia</option>
+                </select>
+            </div>
+        </div>
+        <div id="chart"></div>
+        <p id="chart-msg" class="muted">Cargando velas de Alpaca...</p>
+
+        <h2>Operaciones del bot</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha / hora</th>
+                    <th>Ticker</th>
+                    <th>Tipo</th>
+                    <th>Cantidad</th>
+                    <th>Precio</th>
+                    <th>P&amp;L</th>
+                    <th>Detalle</th>
+                </tr>
+            </thead>
+            <tbody id="trade-rows">
+                <tr><td colspan="7" class="muted">Sin operaciones todavia</td></tr>
+            </tbody>
+        </table>
+
+        <h2>Posiciones abiertas</h2>
         <table>
             <thead>
                 <tr>
@@ -35,36 +91,412 @@
         </table>
     </main>
     <script>
+        const chartState = {
+            chart: null,
+            series: null,
+            symbol: '',
+            timeframe: '15Min',
+            tradingMode: null
+        };
+
+        const DashboardRefresh = {
+            FULL_MS: 15 * 60 * 1000,
+            MODE_MS: 60 * 1000,
+            BOT_MS: 5000,
+            nextFullAt: Date.now() + 15 * 60 * 1000,
+            timers: []
+        };
+
+        function defaultTimeframeForMode(mode) {
+            return mode === 'crypto' ? '6Min' : '15Min';
+        }
+
+        function syncSymbolSelect(data) {
+            const select = document.getElementById('symbol-select');
+            const active = data.active_symbols || [];
+            const all = data.all_symbols || data.symbols || [];
+            const pool = active.length ? active : all;
+            const mode = data.trading_mode || 'stocks';
+            const modeChanged = chartState.tradingMode !== null && chartState.tradingMode !== mode;
+            const prev = select.value;
+
+            select.innerHTML = '';
+            pool.forEach((sym) => {
+                const opt = document.createElement('option');
+                opt.value = sym;
+                opt.textContent = sym;
+                select.appendChild(opt);
+            });
+
+            let needChart = modeChanged;
+            if (pool.length) {
+                if (!pool.includes(prev) || modeChanged || !chartState.symbol) {
+                    select.value = pool[0];
+                    chartState.symbol = pool[0];
+                    needChart = true;
+                } else {
+                    select.value = prev;
+                    chartState.symbol = prev;
+                }
+            }
+
+            if (modeChanged) {
+                const tf = defaultTimeframeForMode(mode);
+                chartState.timeframe = tf;
+                document.getElementById('tf-select').value = tf;
+            }
+
+            chartState.tradingMode = mode;
+            return needChart;
+        }
+
+        function updateRefreshMessage() {
+            const el = document.getElementById('refresh-msg');
+            if (!el) return;
+            const sec = Math.max(0, Math.round((DashboardRefresh.nextFullAt - Date.now()) / 1000));
+            const mins = Math.floor(sec / 60);
+            const rem = sec % 60;
+            el.textContent = 'Sincronizacion completa cada 15 min · proxima en '
+                + mins + 'm ' + rem + 's · cambio de mercado cada 60 s';
+        }
+
+        const BotUI = {
+            active: false,
+            running: false,
+            paused: true,
+            loading: false,
+            pollTimer: null,
+
+            isActive(bot) {
+                if (!bot) return false;
+                if (typeof bot.active === 'boolean') return bot.active;
+                return !!(bot.running && !bot.paused);
+            },
+
+            nextAction() {
+                return this.active ? 'stop' : 'start';
+            },
+
+            apply(bot, loading) {
+                if (typeof loading === 'boolean') {
+                    this.loading = loading;
+                }
+                if (bot) {
+                    this.running = !!bot.running;
+                    this.paused = !!bot.paused;
+                    this.active = this.isActive(bot);
+                }
+
+                const badge = document.getElementById('bot-badge');
+                const badgeText = document.getElementById('bot-badge-text');
+                const btn = document.getElementById('toggle-bot');
+                const icon = document.getElementById('toggle-icon');
+                const label = document.getElementById('toggle-label');
+
+                badge.className = 'bot-badge';
+                btn.className = 'power-btn';
+
+                if (this.loading) {
+                    badge.classList.add('bot-badge--loading');
+                    badgeText.textContent = 'ESTADO: PROCESANDO...';
+                    btn.classList.add('power-btn--loading');
+                    icon.textContent = '⏳';
+                    label.textContent = 'Procesando...';
+                    btn.disabled = true;
+                    return;
+                }
+
+                if (this.active) {
+                    badge.classList.add('bot-badge--active');
+                    badgeText.textContent = 'ESTADO: ACTIVO';
+                    btn.classList.add('power-btn--stop');
+                    icon.textContent = '■';
+                    label.textContent = 'Detener bot';
+                } else {
+                    badge.classList.add('bot-badge--off');
+                    badgeText.textContent = 'ESTADO: APAGADO';
+                    btn.classList.add('power-btn--go');
+                    icon.textContent = '▶';
+                    label.textContent = 'Activar bot';
+                }
+                btn.disabled = false;
+            },
+
+            setMeta(parts) {
+                document.getElementById('control-meta').innerHTML = parts
+                    .map(([k, v]) => '<span>' + k + ': <strong>' + v + '</strong></span>')
+                    .join('');
+            },
+
+            setError(msg) {
+                document.getElementById('control-error').textContent = msg || '';
+            },
+
+            async fetchStatus() {
+                const res = await fetch('/api/bot/status', { credentials: 'same-origin' });
+                if (res.status === 401) {
+                    window.location.href = '/login.html';
+                    return null;
+                }
+                if (!res.ok) return null;
+                return res.json();
+            },
+
+            async sync() {
+                if (this.loading) return null;
+                const bot = await this.fetchStatus();
+                if (bot) {
+                    this.apply(bot, false);
+                }
+                return bot;
+            },
+
+            startFastPoll() {
+                if (this.pollTimer) {
+                    clearInterval(this.pollTimer);
+                }
+                let ticks = 0;
+                this.pollTimer = setInterval(async () => {
+                    ticks += 1;
+                    await this.sync();
+                    if (ticks >= 10) {
+                        clearInterval(this.pollTimer);
+                        this.pollTimer = null;
+                    }
+                }, 2000);
+            },
+
+            async toggle() {
+                if (this.loading) return;
+
+                const snapshot = {
+                    running: this.running,
+                    paused: this.paused,
+                    active: this.active
+                };
+                const action = this.nextAction();
+                const willBeActive = action === 'start';
+
+                this.setError('');
+                this.apply(
+                    { running: willBeActive, paused: !willBeActive, active: willBeActive },
+                    true
+                );
+
+                try {
+                    const res = await fetch('/api/bot', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action })
+                    });
+                    if (res.status === 401) {
+                        window.location.href = '/login.html';
+                        return;
+                    }
+                    const payload = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        throw new Error(payload.error || 'No se pudo cambiar el estado del bot.');
+                    }
+                    if (payload.bot) {
+                        this.apply(payload.bot, false);
+                    } else {
+                        await this.sync();
+                    }
+                    this.startFastPoll();
+                    loadStatus();
+                } catch (err) {
+                    this.apply(snapshot, false);
+                    this.setError(err.message || 'Error al cambiar el estado.');
+                }
+            }
+        };
+
         function money(n) {
             return Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
         }
         function colorClass(name) {
-            if (name === 'VERDE') return 'verde';
-            if (name === 'ROJO') return 'rojo';
+            if (name === 'VERDE' || name === 'buy') return 'verde';
+            if (name === 'ROJO' || name === 'sell') return 'rojo';
             return 'neutro';
         }
-        async function loadStatus() {
-            const msg = document.getElementById('status-msg');
-            const res = await fetch('/api/status', { credentials: 'same-origin' });
+        function sideLabel(side) {
+            return side === 'buy' ? 'COMPRA' : side === 'sell' ? 'VENTA' : side;
+        }
+        function ensureChart() {
+            if (chartState.chart) return;
+            const el = document.getElementById('chart');
+            chartState.chart = LightweightCharts.createChart(el, {
+                width: el.clientWidth,
+                height: 420,
+                layout: { background: { color: '#0b1220' }, textColor: '#93a0bb' },
+                grid: { vertLines: { color: '#243049' }, horzLines: { color: '#243049' } },
+                rightPriceScale: { borderColor: '#243049' },
+                timeScale: { borderColor: '#243049', timeVisible: true, secondsVisible: false },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+            });
+            chartState.series = chartState.chart.addCandlestickSeries({
+                upColor: '#22c55e',
+                downColor: '#ef4444',
+                borderUpColor: '#22c55e',
+                borderDownColor: '#ef4444',
+                wickUpColor: '#22c55e',
+                wickDownColor: '#ef4444'
+            });
+            window.addEventListener('resize', () => {
+                if (chartState.chart) {
+                    chartState.chart.applyOptions({ width: el.clientWidth });
+                }
+            });
+        }
+        async function loadChart() {
+            const symbol = document.getElementById('symbol-select').value || chartState.symbol;
+            const timeframe = document.getElementById('tf-select').value || chartState.timeframe;
+            if (!symbol) return;
+            chartState.symbol = symbol;
+            chartState.timeframe = timeframe;
+            const msg = document.getElementById('chart-msg');
+            const res = await fetch('/api/chart?symbol=' + encodeURIComponent(symbol) + '&timeframe=' + encodeURIComponent(timeframe), {
+                credentials: 'same-origin'
+            });
             if (res.status === 401) {
                 window.location.href = '/login.html';
                 return;
             }
             if (!res.ok) {
-                msg.textContent = 'No se pudo obtener el estado de la cuenta.';
+                msg.textContent = 'No se pudieron cargar las velas de ' + symbol + '.';
                 return;
             }
             const data = await res.json();
-            msg.textContent = data.market_open
-                ? 'Mercado abierto | paper=' + data.paper + ' | dry_run=' + data.dry_run
-                : 'Mercado cerrado | proxima apertura ' + (data.next_open || 'n/a');
+            ensureChart();
+            chartState.series.setData(data.candles || []);
+            chartState.series.setMarkers(data.markers || []);
+            document.getElementById('chart-title').textContent = 'Velas ' + data.symbol + ' · ' + data.timeframe;
+            const buys = (data.markers || []).filter((m) => m.side === 'buy').length;
+            const sells = (data.markers || []).filter((m) => m.side === 'sell').length;
+            msg.textContent = (data.candles || []).length + ' velas Alpaca · '
+                + buys + ' compras (verde) · ' + sells + ' ventas (rojo)';
+        }
+        function fillSymbols(symbols) {
+            /* sustituido por syncSymbolSelect en renderDashboard */
+            void symbols;
+        }
+        function renderSchedulerLayers(scheduler, tradingMode, tradingModeLabel, activeSymbols) {
+            const el = document.getElementById('scheduler-layers');
+            const modeLine = tradingModeLabel
+                ? '<div class="trading-mode trading-mode--' + (tradingMode || 'stocks') + '">'
+                    + '<strong>' + tradingModeLabel + '</strong>'
+                    + ' · activos: ' + (activeSymbols && activeSymbols.length ? activeSymbols.join(', ') : '—')
+                    + '</div>'
+                : '';
+            if (!scheduler || !scheduler.layers) {
+                el.innerHTML = modeLine + '<p>El bot aun no ha publicado estado de capas (activalo desde el panel).</p>';
+                return;
+            }
+            const layerBits = Object.keys(scheduler.layers).map((name) => {
+                const row = scheduler.layers[name];
+                const mins = Math.round((row.interval_seconds || 0) / 60);
+                const next = row.next_in_seconds != null ? row.next_in_seconds + 's' : '—';
+                const label = name === '3m' ? 'Rapido' : name === '6m' ? 'Senales' : 'Macro';
+                return '<span class="layer-chip"><strong>' + name + '</strong> ' + label
+                    + ' · cada ' + mins + 'm · prox ' + next + '</span>';
+            });
+            const symBits = Object.keys(scheduler.symbols || {}).map((sym) => {
+                const s = scheduler.symbols[sym];
+                const spike = s.spike ? ' ⚡' + (s.spike_move_pct || 0).toFixed(2) + '%' : '';
+                const trend = s.trend || s.trend_1h || '—';
+                return sym + ': señal=' + (s.signal || 'hold')
+                    + ' | 9m=' + (s.structure || '—')
+                    + ' | trend=' + trend
+                    + ' | macro=' + (s.macro || '—')
+                    + spike;
+            });
+            el.innerHTML = modeLine + '<div class="layer-row">' + layerBits.join('') + '</div>'
+                + '<div class="layer-symbols">' + symBits.join(' · ') + '</div>';
+        }
+        function renderDashboard(data) {
+            if (data.bot && !BotUI.loading) {
+                BotUI.apply(data.bot, false);
+            }
+
+            const needChart = syncSymbolSelect(data);
+            const market = data.market_open ? 'Mercado abierto' : 'Mercado cerrado';
+            const intervalSec = Number(data.scheduler_tick_seconds || data.poll_interval_seconds || 0);
+            const intervalTxt = intervalSec >= 60
+                ? (intervalSec / 60).toFixed(intervalSec % 60 === 0 ? 0 : 1) + ' min'
+                : intervalSec + ' s';
+
+            BotUI.setMeta([
+                ['Modo', data.trading_mode_label || (data.market_open ? 'Modo Acciones' : 'Modo Cripto Nocturno/Fin de Semana')],
+                ['Activos', (data.active_symbols || []).join(', ') || '—'],
+                ['Mercado US', market],
+                ['Refresco', '15 min auto'],
+                ['Tick', intervalTxt],
+                ['Bot', data.bot && data.bot.active ? 'ACTIVO' : 'APAGADO'],
+                ['Telegram', data.telegram_verified ? 'Activo' : (data.telegram_enabled ? 'Error token' : 'Off')],
+                ['Ejecucion', data.dry_run ? 'Dry-run' : (data.paper ? 'Paper live' : 'Live')],
+                ['PID', data.bot && data.bot.pid ? String(data.bot.pid) : '—']
+            ]);
+
+            renderSchedulerLayers(
+                data.scheduler,
+                data.trading_mode,
+                data.trading_mode_label,
+                data.active_symbols
+            );
+
+            const realized = Number(data.realized_pnl || 0);
+            const realizedClass = realized > 0 ? 'verde' : realized < 0 ? 'rojo' : 'neutro';
             document.getElementById('metrics').innerHTML = [
-                ['Equity', money(data.equity)],
+                ['Balance (equity)', money(data.equity)],
                 ['Cash', money(data.cash)],
                 ['Buying power', money(data.buying_power)],
-                ['SL / TP', (data.stop_loss_pct * 100).toFixed(1) + '% / ' + (data.take_profit_pct * 100).toFixed(1) + '%'],
-                ['Simbolos', (data.symbols || []).join(', ')]
+                ['P&L acumulado', '<span class="' + realizedClass + '">' + (realized >= 0 ? '+' : '') + money(realized) + '</span>'],
+                ['Operaciones', String(data.trade_count || 0)]
             ].map(([k, v]) => '<div class="metric"><span>' + k + '</span><strong>' + v + '</strong></div>').join('');
+
+            const strategy = (data.strategy && data.strategy.symbols) || {};
+            const strategyBits = Object.keys(strategy).map((sym) => {
+                const row = strategy[sym];
+                const train = row.train_return_pct == null ? 'n/a' : row.train_return_pct.toFixed(1) + '%';
+                const valid = row.validate_return_pct == null ? 'n/a' : row.validate_return_pct.toFixed(1) + '%';
+                return sym + ' [' + (row.asset_class || 'stock') + '] SMA' + row.sma_fast + '/' + row.sma_slow
+                    + ' · train ' + train + ' · valid ' + valid;
+            });
+            document.getElementById('strategy-msg').textContent = strategyBits.length
+                ? 'Walk-forward 3+3 años: ' + strategyBits.join(' | ')
+                : 'Sin walk-forward todavía. En el servidor: python main.py --backtest';
+
+            if (needChart) {
+                loadChart();
+            } else if (!chartState.symbol && (data.active_symbols || []).length) {
+                chartState.symbol = data.active_symbols[0];
+                document.getElementById('symbol-select').value = chartState.symbol;
+                loadChart();
+            }
+
+            const tradeRows = document.getElementById('trade-rows');
+            if (!data.trades || !data.trades.length) {
+                tradeRows.innerHTML = '<tr><td colspan="7" class="muted">El bot aun no ha registrado compras ni ventas</td></tr>';
+            } else {
+                tradeRows.innerHTML = data.trades.map((t) => {
+                    const pnl = t.pnl_abs == null
+                        ? '—'
+                        : (t.pnl_abs >= 0 ? '+' : '') + money(t.pnl_abs)
+                            + (t.pnl_pct == null ? '' : ' (' + (t.pnl_pct >= 0 ? '+' : '') + t.pnl_pct.toFixed(2) + '%)');
+                    const pnlClass = t.pnl_abs == null ? 'neutro' : (t.pnl_abs >= 0 ? 'verde' : 'rojo');
+                    return '<tr>' +
+                        '<td>' + t.created_at + '</td>' +
+                        '<td>' + t.symbol + '</td>' +
+                        '<td class="' + colorClass(t.side) + '">' + sideLabel(t.side) + '</td>' +
+                        '<td>' + t.qty + '</td>' +
+                        '<td>' + money(t.price) + '</td>' +
+                        '<td class="' + pnlClass + '">' + pnl + '</td>' +
+                        '<td>' + (t.reason || '') + (t.dry_run ? ' · dry-run' : '') + '</td>' +
+                        '</tr>';
+                }).join('');
+            }
+
             const rows = document.getElementById('rows');
             if (!data.positions || !data.positions.length) {
                 rows.innerHTML = '<tr><td colspan="6" class="muted">No hay posiciones abiertas</td></tr>';
@@ -82,7 +514,38 @@
                     '</tr>';
             }).join('');
         }
-        loadStatus();
+        async function loadStatus() {
+            const res = await fetch('/api/status', { credentials: 'same-origin' });
+            if (res.status === 401) {
+                window.location.href = '/login.html';
+                return null;
+            }
+            if (!res.ok) {
+                BotUI.setError('No se pudo obtener el estado de la cuenta.');
+                return null;
+            }
+            const data = await res.json();
+            renderDashboard(data);
+            return data;
+        }
+
+        async function fullRefresh() {
+            DashboardRefresh.nextFullAt = Date.now() + DashboardRefresh.FULL_MS;
+            await loadStatus();
+            await loadChart();
+            updateRefreshMessage();
+        }
+
+        document.getElementById('toggle-bot').addEventListener('click', () => BotUI.toggle());
+        document.getElementById('symbol-select').addEventListener('change', loadChart);
+        document.getElementById('tf-select').addEventListener('change', loadChart);
+
+        BotUI.sync().then(() => fullRefresh());
+        DashboardRefresh.timers.push(setInterval(() => BotUI.sync(), DashboardRefresh.BOT_MS));
+        DashboardRefresh.timers.push(setInterval(() => loadStatus(), DashboardRefresh.MODE_MS));
+        DashboardRefresh.timers.push(setInterval(() => fullRefresh(), DashboardRefresh.FULL_MS));
+        DashboardRefresh.timers.push(setInterval(updateRefreshMessage, 1000));
+        updateRefreshMessage();
     </script>
 </body>
 </html>
