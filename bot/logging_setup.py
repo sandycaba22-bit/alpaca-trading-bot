@@ -75,6 +75,7 @@ def setup_logging(level: str = "INFO", log_dir: Path | None = None) -> None:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("alpaca").setLevel(logging.WARNING)
+    logging.getLogger("alpaca.data.live").setLevel(logging.INFO)
 
 
 def _setup_audit_logger(log_dir: Path, redactor: RedactingFilter) -> None:

@@ -3,5 +3,13 @@
 from .client import AlpacaClient
 from .execution import OrderExecutor
 from .market_data import LiveTape, MarketDataService
+from .stream import LiveMarketStream, StreamHealth
 
-__all__ = ["AlpacaClient", "LiveTape", "MarketDataService", "OrderExecutor"]
+__all__ = [
+    "AlpacaClient",
+    "LiveTape",
+    "LiveMarketStream",
+    "MarketDataService",
+    "OrderExecutor",
+    "StreamHealth",
+]

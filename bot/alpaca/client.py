@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
 from alpaca.trading.client import TradingClient
 from alpaca.trading.models import Clock, TradeAccount
 
+from bot.alpaca.market_clock import MarketClockView, crypto_fallback_clock, from_alpaca_clock
 from bot.config import Settings
 from bot.security.audit import audit
-from bot.security.errors import log_caught
 from bot.security.ratelimit import RateLimitConfig, RateLimiter
 from bot.security.secrets import mask_secret
 
@@ -55,6 +55,10 @@ class AlpacaClient:
             api_key=settings.api_key_id,
             secret_key=settings.api_secret_key,
         )
+        self.crypto_data = CryptoHistoricalDataClient(
+            api_key=settings.api_key_id,
+            secret_key=settings.api_secret_key,
+        )
         logger.info(
             "Cliente Alpaca inicializado | paper=%s | base_url=%s | key=%s",
             settings.paper,
@@ -86,41 +90,93 @@ class AlpacaClient:
             paper=self.settings.paper,
         )
 
-    def validate_connection(self) -> AccountSnapshot:
-        """Comprueba credenciales, estado de cuenta y reloj de mercado."""
-        logger.info("Validando conexion con Alpaca...")
+    def get_market_clock(self) -> MarketClockView:
+        """Reloj NYSE; si falla, asume cerrado y sigue en modo cripto."""
+        try:
+            return from_alpaca_clock(self.get_clock())
+        except Exception as exc:
+            logger.info(
+                "Reloj de acciones no disponible (%s) — se asume mercado cerrado / modo cripto",
+                type(exc).__name__,
+            )
+            return crypto_fallback_clock()
+
+    def snapshot_account_optional(self) -> AccountSnapshot | None:
+        try:
+            return self.snapshot_account()
+        except Exception as exc:
+            logger.info(
+                "Cuenta Alpaca no consultada en este ciclo (%s) — el bot sigue en modo híbrido",
+                type(exc).__name__,
+            )
+            return None
+
+    def validate_startup(self) -> tuple[AccountSnapshot | None, MarketClockView]:
+        """Validación no bloqueante: credenciales útiles pero sin exigir mercado de acciones."""
+        logger.info("Validando conexion con Alpaca (modo hibrido)...")
+        snapshot: AccountSnapshot | None = None
+        clock = crypto_fallback_clock()
+
         try:
             snapshot = self.snapshot_account()
-            clock = self.get_clock()
         except Exception as exc:
-            log_caught(logger, "auth_failed", exc, paper=self.settings.paper)
-            audit("auth", "deny", reason="connection_failed")
-            raise ConnectionError("No se pudo validar la conexion con Alpaca.") from None
-
-        if snapshot.account_blocked or snapshot.trading_blocked:
-            audit("auth", "deny", reason="account_blocked")
-            raise RuntimeError("La cuenta Alpaca no permite operar.")
-
-        if str(snapshot.status).lower() not in {"active", "accountstatus.active"}:
-            logger.warning("Estado de cuenta inesperado")
-            audit("auth", "warn", reason="unexpected_status")
-
-        audit("auth", "allow", paper=snapshot.paper, market_open=clock.is_open)
-        logger.info(
-            "Conexion OK | paper=%s | status=%s | equity=%.2f %s | "
-            "buying_power=%.2f | cash=%.2f | market_open=%s",
-            snapshot.paper,
-            snapshot.status,
-            snapshot.equity,
-            snapshot.currency,
-            snapshot.buying_power,
-            snapshot.cash,
-            clock.is_open,
-        )
-        if not clock.is_open:
             logger.info(
-                "Mercado cerrado. Proxima apertura: %s | cierre: %s",
-                clock.next_open,
-                clock.next_close,
+                "Cuenta Alpaca no disponible al arranque (%s) — se continua en modo hibrido",
+                type(exc).__name__,
             )
+
+        try:
+            clock = from_alpaca_clock(self.get_clock())
+        except Exception as exc:
+            logger.info(
+                "Reloj NYSE omitido (%s) — operacion cripto / fuera de horario permitida",
+                type(exc).__name__,
+            )
+            clock = crypto_fallback_clock()
+
+        if snapshot is not None:
+            if snapshot.account_blocked or snapshot.trading_blocked:
+                logger.warning(
+                    "Cuenta con restricciones (blocked=%s trading_blocked=%s) — "
+                    "solo se operara cripto si el broker lo permite",
+                    snapshot.account_blocked,
+                    snapshot.trading_blocked,
+                )
+            audit(
+                "auth",
+                "allow",
+                paper=snapshot.paper,
+                market_open=clock.is_open,
+                account_ok=True,
+            )
+            logger.info(
+                "Conexion OK | paper=%s | status=%s | equity=%.2f %s | "
+                "buying_power=%.2f | cash=%.2f | mercado_acciones=%s",
+                snapshot.paper,
+                snapshot.status,
+                snapshot.equity,
+                snapshot.currency,
+                snapshot.buying_power,
+                snapshot.cash,
+                "abierto" if clock.is_open else "cerrado",
+            )
+            if not clock.is_open and clock.stock_feed_ok:
+                logger.info(
+                    "Mercado de acciones cerrado — modo cripto activo si corresponde"
+                )
+        else:
+            audit("auth", "warn", reason="account_unavailable", market_open=clock.is_open)
+            logger.info(
+                "Arranque sin snapshot de cuenta — el motor puede operar cripto en seco"
+            )
+
+        return snapshot, clock
+
+    def validate_connection(self) -> AccountSnapshot:
+        """Compatibilidad: validacion estricta solo para --validate."""
+        snapshot, clock = self.validate_startup()
+        if snapshot is None:
+            raise ConnectionError("No se pudo leer la cuenta Alpaca.")
+        if snapshot.account_blocked or snapshot.trading_blocked:
+            raise RuntimeError("La cuenta Alpaca no permite operar.")
         return snapshot

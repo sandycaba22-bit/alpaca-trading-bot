@@ -4,29 +4,188 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from alpaca.common.exceptions import APIError
 from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
 from alpaca.trading.models import Order, Position
-from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
+from alpaca.trading.requests import GetOrdersRequest, LimitOrderRequest, MarketOrderRequest
 
 from bot.alpaca.client import AlpacaClient
 from bot.config import PROJECT_ROOT
-from bot.market.assets import is_crypto_symbol
+from bot.market.assets import is_crypto_symbol, normalize_symbol
+from bot.market.dust import dust_threshold_for
 from bot.notify.telegram import TelegramNotifier
 from bot.security.audit import audit
 from bot.security.errors import log_caught
 from bot.security.exceptions import RateLimitError, ValidationError
 from bot.security.sanitize import sanitize_qty, sanitize_symbol
+from bot.security.secrets import redact_text
 from bot.storage.journal import TradeJournal
+from bot.storage.pending_orders import PendingOrderBook
 from bot.storage.positions import OpenPositionBook, TrackedPosition
 
 logger = logging.getLogger(__name__)
 
 LIVE_CONFIRM_PATH = PROJECT_ROOT / "data" / "live_confirm.txt"
 _CONFIRM_WORD = "CONFIRMO"
+
+
+@dataclass
+class OrderSubmitResult:
+    accepted: bool
+    order: Order | dict[str, Any] | None = None
+    order_type: str = "market"
+    limit_price: float | None = None
+    spread_pct: float | None = None
+    broker_detail: str = ""
+    filled_qty: float = 0.0
+    fill_price: float = 0.0
+    wide_spread_market: bool = False
+    filled: bool = False
+    resting: bool = False
+    order_id: str = ""
+
+
+def alpaca_reject_detail(exc: BaseException) -> str:
+    """Motivo exacto de Alpaca (sin secretos) para logs y Telegram."""
+    if isinstance(exc, APIError):
+        try:
+            return redact_text(
+                f"Alpaca HTTP {exc.status_code} code={exc.code} {exc.message}"
+            )[:400]
+        except Exception:
+            raw = getattr(exc, "_error", None) or str(exc)
+            return redact_text(str(raw))[:400]
+    if isinstance(exc, RateLimitError):
+        return redact_text(str(exc) or "rate_limit")[:400]
+    return redact_text(str(exc) or type(exc).__name__)[:400]
+
+
+def _round_limit_price(price: float, symbol: str) -> float:
+    if price <= 0:
+        return 0.0
+    if is_crypto_symbol(symbol):
+        if price >= 1000:
+            return round(price, 2)
+        if price >= 1:
+            return round(price, 4)
+        return round(price, 6)
+    if price >= 1:
+        return round(price, 2)
+    return round(price, 4)
+
+
+def choose_limit_price(
+    side: OrderSide,
+    last_price: float,
+    bid: float | None,
+    ask: float | None,
+    tolerance_pct: float,
+    symbol: str,
+) -> float:
+    last = float(last_price or 0.0)
+    if last <= 0 and bid and ask:
+        last = (float(bid) + float(ask)) / 2.0
+    if last <= 0:
+        return 0.0
+    if side is OrderSide.BUY:
+        cap = last * (1.0 + tolerance_pct)
+        px = min(float(ask), cap) if ask and ask > 0 else cap
+        if bid and px < float(bid):
+            px = float(bid)
+    else:
+        floor = last * (1.0 - tolerance_pct)
+        px = max(float(bid), floor) if bid and bid > 0 else floor
+        if ask and px > float(ask):
+            px = float(ask)
+    return _round_limit_price(px, symbol)
+
+
+def _order_status_name(order: Any) -> str:
+    status = getattr(order, "status", "") or ""
+    text = str(status)
+    if "." in text:
+        text = text.split(".")[-1]
+    return text.lower()
+
+
+def _order_remaining(order: Any) -> float:
+    qty = float(getattr(order, "qty", 0) or 0)
+    filled = float(getattr(order, "filled_qty", 0) or 0)
+    return max(0.0, qty - filled)
+
+
+def time_in_force_for(
+    symbol: str,
+    *,
+    use_limit: bool,
+    stock_tif: TimeInForce = TimeInForce.DAY,
+) -> TimeInForce:
+    """Cripto: GTC (market) o IOC (limit). Acciones: DAY (market) o IOC (limit)."""
+    if is_crypto_symbol(symbol):
+        return TimeInForce.IOC if use_limit else TimeInForce.GTC
+    return TimeInForce.IOC if use_limit else stock_tif
+
+
+def classify_order(order: Any) -> str:
+    """filled | partial | resting | failed."""
+    status = _order_status_name(order)
+    filled = float(getattr(order, "filled_qty", 0) or 0)
+    remaining = _order_remaining(order)
+    rejected = str(
+        getattr(order, "rejected_reason", None)
+        or getattr(order, "cancel_reason", None)
+        or ""
+    ).strip()
+    if "reject" in status:
+        return "failed"
+    terminal_dead = any(token in status for token in ("cancel", "expir", "done_for_day"))
+    if terminal_dead:
+        if remaining <= 1e-9 and filled > 0:
+            return "filled"
+        if filled > 0:
+            return "partial"
+        return "failed"
+    if status == "filled" or (filled > 0 and remaining <= 1e-9):
+        return "filled"
+    if filled > 0:
+        return "partial"
+    if status in {
+        "new",
+        "accepted",
+        "pending_new",
+        "pending_replace",
+        "held",
+        "replaced",
+        "partially_filled",
+        "pending_cancel",
+    }:
+        return "resting"
+    if rejected:
+        return "failed"
+    return "resting"
+
+
+def _order_was_accepted(order: Any) -> tuple[bool, str]:
+    status = _order_status_name(order)
+    filled = float(getattr(order, "filled_qty", 0) or 0)
+    kind = classify_order(order)
+    if kind == "failed":
+        rejected = str(
+            getattr(order, "rejected_reason", None)
+            or getattr(order, "cancel_reason", None)
+            or ""
+        ).strip()
+        return False, rejected or f"status={status} (sin fill)"
+    if kind == "filled":
+        return True, f"status={status} filled_qty={filled:g}"
+    if kind == "partial":
+        return True, f"status={status} filled_qty={filled:g} (parcial)"
+    return True, f"status={status}"
 
 
 def _read_live_confirm_file(path: Path) -> tuple[str, str]:
@@ -59,6 +218,7 @@ class OrderExecutor:
         dry_run: bool = True,
         journal: TradeJournal | None = None,
         position_book: OpenPositionBook | None = None,
+        pending_fills: PendingOrderBook | None = None,
         notifier: TelegramNotifier | None = None,
         live_account_id: str = "",
     ) -> None:
@@ -67,12 +227,13 @@ class OrderExecutor:
         self.journal = journal or TradeJournal()
         # Libro local: fuente de verdad en dry-run; en live guarda SL/TP de alerta
         self.position_book = position_book or OpenPositionBook()
+        self.pending_fills = pending_fills or PendingOrderBook()
         self.notifier = notifier
         self.live_account_id = str(live_account_id or "").strip()
         self._live_order_confirmed = False
 
     def get_position(self, symbol: str) -> Position | SimpleNamespace | None:
-        symbol = sanitize_symbol(symbol)
+        symbol = normalize_symbol(sanitize_symbol(symbol))
         if self.dry_run:
             tracked = self.position_book.get(symbol)
             return _as_broker_position(tracked) if tracked else None
@@ -82,6 +243,13 @@ class OrderExecutor:
         except ValidationError:
             raise
         except Exception:
+            compact = symbol.replace("/", "")
+            if compact != symbol:
+                try:
+                    self.client.limiter.acquire("trading_read")
+                    return self.client.trading.get_open_position(compact)
+                except Exception:
+                    pass
             return None
 
     def list_positions(self) -> list[Position | SimpleNamespace]:
@@ -101,6 +269,12 @@ class OrderExecutor:
         )
         return list(self.client.trading.get_orders(filter=request))
 
+    def get_order(self, order_id: str) -> Order | None:
+        if self.dry_run or not order_id:
+            return None
+        self.client.limiter.acquire("trading_read")
+        return self.client.trading.get_order_by_id(order_id)
+
     def submit_market_order(
         self,
         symbol: str,
@@ -116,43 +290,346 @@ class OrderExecutor:
         stop_pct: float | None = None,
         take_profit_pct: float | None = None,
     ) -> Order | dict[str, Any]:
-        symbol = sanitize_symbol(symbol)
+        result = self.submit_smart_order(
+            symbol,
+            qty,
+            side,
+            time_in_force=time_in_force,
+            price=price,
+            entry_price=entry_price,
+            reason=reason,
+            stop_price=stop_price,
+            take_profit_price=take_profit_price,
+            stop_pct=stop_pct,
+            take_profit_pct=take_profit_pct,
+        )
+        if not result.accepted:
+            raise RuntimeError(result.broker_detail or "No se pudo enviar la orden.")
+        return result.order if result.order is not None else {"dry_run": True}
+
+    def submit_smart_order(
+        self,
+        symbol: str,
+        qty: float,
+        side: OrderSide,
+        time_in_force: TimeInForce = TimeInForce.DAY,
+        price: float | None = None,
+        entry_price: float | None = None,
+        reason: str = "signal",
+        *,
+        stop_price: float | None = None,
+        take_profit_price: float | None = None,
+        stop_pct: float | None = None,
+        take_profit_pct: float | None = None,
+        bid: float | None = None,
+        ask: float | None = None,
+        spread_pct: float | None = None,
+        limit_spread_pct: float = 0.0015,
+        attempt: int = 1,
+    ) -> OrderSubmitResult:
+        symbol = normalize_symbol(sanitize_symbol(symbol))
         qty = sanitize_qty(qty, fractional=is_crypto_symbol(symbol))
-        tif = TimeInForce.GTC if is_crypto_symbol(symbol) else time_in_force
         if side not in (OrderSide.BUY, OrderSide.SELL):
             raise ValidationError("Lado de orden no permitido")
 
+        last_price = float(price or 0.0)
+        use_limit = False
+        limit_price: float | None = None
+        wide_spread_market = False
+        if spread_pct is not None and spread_pct > float(limit_spread_pct):
+            fractional_stock = (not is_crypto_symbol(symbol)) and abs(qty - round(qty)) > 1e-9
+            if fractional_stock:
+                wide_spread_market = True
+                logger.info(
+                    "%s | spread %.4f%% > límite %.4f%% pero qty fraccionaria en acciones "
+                    "no admite limit — se envía market",
+                    symbol,
+                    spread_pct * 100.0,
+                    limit_spread_pct * 100.0,
+                )
+            else:
+                limit_price = choose_limit_price(
+                    side, last_price, bid, ask, limit_spread_pct, symbol
+                )
+                use_limit = bool(limit_price and limit_price > 0)
+
+        order_type = "limit" if use_limit else "market"
+        tif = time_in_force_for(symbol, use_limit=use_limit, stock_tif=time_in_force)
+
         try:
             self.client.limiter.acquire("order")
-        except RateLimitError:
+        except RateLimitError as exc:
+            detail = alpaca_reject_detail(exc)
+            logger.warning(
+                "%s | orden intento %s | %s qty=%s type=%s spread=%s | RECHAZADA | %s",
+                symbol,
+                attempt,
+                side.value,
+                qty,
+                order_type,
+                f"{spread_pct:.4%}" if spread_pct is not None else "n/a",
+                detail,
+            )
             audit("order_submit", "deny", symbol=symbol, reason="rate_limit", dry_run=self.dry_run)
-            raise
+            return OrderSubmitResult(
+                accepted=False,
+                order_type=order_type,
+                limit_price=limit_price,
+                spread_pct=spread_pct,
+                broker_detail=detail,
+                wide_spread_market=wide_spread_market,
+            )
 
         payload = {
             "symbol": symbol,
             "qty": qty,
             "side": side.value,
-            "type": "market",
+            "type": order_type,
             "time_in_force": tif.value,
         }
+        if use_limit:
+            payload["limit_price"] = limit_price
 
         if self.dry_run:
-            logger.info("DRY_RUN | orden no enviada | %s", payload)
+            logger.info(
+                "%s | orden intento %s | DRY_RUN %s qty=%s type=%s spread=%s limit=%s | aceptada",
+                symbol,
+                attempt,
+                side.value,
+                qty,
+                order_type,
+                f"{spread_pct:.4%}" if spread_pct is not None else "n/a",
+                f"{limit_price:.4f}" if limit_price else "—",
+            )
             audit("order_submit", "dry_run", symbol=symbol, qty=qty, side=side.value)
-            fill_price = float(price or 0.0)
-            if fill_price > 0:
-                self.journal.record(
+            self._record_fill(
+                symbol,
+                qty,
+                side,
+                last_price,
+                entry_price=entry_price,
+                reason=reason,
+                dry_run=True,
+                order_id="dry_run",
+                stop_price=stop_price,
+                take_profit_price=take_profit_price,
+                stop_pct=stop_pct,
+                take_profit_pct=take_profit_pct,
+            )
+            return OrderSubmitResult(
+                accepted=True,
+                order={"dry_run": True, **payload},
+                order_type=order_type,
+                limit_price=limit_price,
+                spread_pct=spread_pct,
+                broker_detail="dry_run",
+                filled_qty=qty,
+                fill_price=last_price,
+                wide_spread_market=wide_spread_market,
+                filled=True,
+                resting=False,
+                order_id="dry_run",
+            )
+
+        self._require_live_confirm(symbol, qty, side)
+
+        try:
+            order = self._broker_submit(symbol, qty, side, tif, use_limit, limit_price)
+        except ValidationError:
+            raise
+        except Exception as exc:
+            detail = alpaca_reject_detail(exc)
+            logger.warning(
+                "%s | orden intento %s | %s qty=%s type=%s spread=%s limit=%s | RECHAZADA | %s",
+                symbol,
+                attempt,
+                side.value,
+                qty,
+                order_type,
+                f"{spread_pct:.4%}" if spread_pct is not None else "n/a",
+                f"{limit_price:.4f}" if limit_price else "—",
+                detail,
+            )
+            audit(
+                "order_submit",
+                "deny",
+                symbol=symbol,
+                qty=qty,
+                side=side.value,
+                reason=detail[:180],
+            )
+            return OrderSubmitResult(
+                accepted=False,
+                order_type=order_type,
+                limit_price=limit_price,
+                spread_pct=spread_pct,
+                broker_detail=detail,
+                wide_spread_market=wide_spread_market,
+            )
+
+        ok, status_detail = _order_was_accepted(order)
+        fill_price = float(getattr(order, "filled_avg_price", None) or last_price or 0.0)
+        filled_qty = float(getattr(order, "filled_qty", 0) or 0)
+        order_id = str(getattr(order, "id", "") or "")
+        kind = classify_order(order)
+        if ok:
+            logger.info(
+                "%s | orden intento %s | %s qty=%s type=%s spread=%s limit=%s | "
+                "aceptada id=%s | %s",
+                symbol,
+                attempt,
+                side.value,
+                qty,
+                order_type,
+                f"{spread_pct:.4%}" if spread_pct is not None else "n/a",
+                f"{limit_price:.4f}" if limit_price else "—",
+                order_id or "—",
+                status_detail,
+            )
+            if filled_qty > 0:
+                self._record_fill(
                     symbol,
-                    side.value,
-                    qty,
+                    filled_qty,
+                    side,
                     fill_price,
                     entry_price=entry_price,
                     reason=reason,
-                    dry_run=True,
-                    order_id="dry_run",
+                    dry_run=False,
+                    order_id=order_id,
+                    stop_price=stop_price,
+                    take_profit_price=take_profit_price,
+                    stop_pct=stop_pct,
+                    take_profit_pct=take_profit_pct,
                 )
-            # Ciclo de vida local: registra compra / cierra venta en el libro
-            if side is OrderSide.BUY and fill_price > 0:
+            elif kind == "resting":
+                logger.info(
+                    "%s | orden en vuelo (sin fill) | id=%s | libro intacto",
+                    symbol,
+                    order_id or "—",
+                )
+            audit(
+                "order_submit",
+                "allow",
+                symbol=symbol,
+                qty=qty,
+                side=side.value,
+                order_id=order_id,
+            )
+            return OrderSubmitResult(
+                accepted=True,
+                order=order,
+                order_type=order_type,
+                limit_price=limit_price,
+                spread_pct=spread_pct,
+                broker_detail=status_detail,
+                filled_qty=filled_qty,
+                fill_price=fill_price if filled_qty > 0 else 0.0,
+                wide_spread_market=wide_spread_market,
+                filled=kind == "filled",
+                resting=kind in {"resting", "partial"},
+                order_id=order_id,
+            )
+
+        logger.warning(
+            "%s | orden intento %s | %s qty=%s type=%s spread=%s limit=%s | RECHAZADA | %s",
+            symbol,
+            attempt,
+            side.value,
+            qty,
+            order_type,
+            f"{spread_pct:.4%}" if spread_pct is not None else "n/a",
+            f"{limit_price:.4f}" if limit_price else "—",
+            status_detail,
+        )
+        audit("order_submit", "deny", symbol=symbol, qty=qty, side=side.value, reason=status_detail[:180])
+        return OrderSubmitResult(
+            accepted=False,
+            order=order,
+            order_type=order_type,
+            limit_price=limit_price,
+            spread_pct=spread_pct,
+            broker_detail=status_detail,
+            filled_qty=filled_qty,
+            wide_spread_market=wide_spread_market,
+        )
+
+    def _broker_submit(
+        self,
+        symbol: str,
+        qty: float,
+        side: OrderSide,
+        tif: TimeInForce,
+        use_limit: bool,
+        limit_price: float | None,
+    ) -> Order:
+        if use_limit and limit_price:
+            try:
+                request: MarketOrderRequest | LimitOrderRequest = LimitOrderRequest(
+                    symbol=symbol,
+                    qty=qty,
+                    side=side,
+                    time_in_force=tif,
+                    limit_price=limit_price,
+                )
+                return self.client.trading.submit_order(order_data=request)
+            except Exception as exc:
+                detail = alpaca_reject_detail(exc).lower()
+                if tif is TimeInForce.IOC and ("ioc" in detail or "time_in_force" in detail):
+                    fallback_tif = TimeInForce.GTC if is_crypto_symbol(symbol) else TimeInForce.DAY
+                    logger.warning(
+                        "%s | IOC no soportada (%s) — reintento limit TIF=%s",
+                        symbol,
+                        alpaca_reject_detail(exc),
+                        fallback_tif.value,
+                    )
+                    request = LimitOrderRequest(
+                        symbol=symbol,
+                        qty=qty,
+                        side=side,
+                        time_in_force=fallback_tif,
+                        limit_price=limit_price,
+                    )
+                    return self.client.trading.submit_order(order_data=request)
+                raise
+        request = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=side,
+            time_in_force=tif,
+        )
+        return self.client.trading.submit_order(order_data=request)
+
+    def _record_fill(
+        self,
+        symbol: str,
+        qty: float,
+        side: OrderSide,
+        fill_price: float,
+        *,
+        entry_price: float | None,
+        reason: str,
+        dry_run: bool,
+        order_id: str,
+        stop_price: float | None,
+        take_profit_price: float | None,
+        stop_pct: float | None,
+        take_profit_pct: float | None,
+    ) -> float:
+        dust_absorbed = 0.0
+        if fill_price > 0:
+            self.journal.record(
+                symbol,
+                side.value,
+                qty,
+                fill_price,
+                entry_price=entry_price,
+                reason=reason,
+                dry_run=dry_run,
+                order_id=order_id or ("dry_run" if dry_run else ""),
+            )
+        if side is OrderSide.BUY and fill_price > 0:
+            existing = self.position_book.get(symbol)
+            if existing is None:
                 self.position_book.open(
                     symbol,
                     qty,
@@ -161,61 +638,62 @@ class OrderExecutor:
                     take_profit_price=float(take_profit_price or fill_price * 1.015),
                     stop_pct=float(stop_pct or 0.01),
                     take_profit_pct=float(take_profit_pct or 0.015),
-                    dry_run=True,
+                    dry_run=dry_run,
                 )
-            elif side is OrderSide.SELL:
-                self.position_book.close(symbol)
-            return {"dry_run": True, **payload}
-
-        self._require_live_confirm(symbol, qty, side)
-
-        try:
-            request = MarketOrderRequest(
-                symbol=symbol,
-                qty=qty,
-                side=side,
-                time_in_force=tif,
-            )
-            order = self.client.trading.submit_order(order_data=request)
-        except Exception as exc:
-            log_caught(logger, "order_submit_failed", exc, symbol=symbol, side=side.value)
-            audit("order_submit", "deny", symbol=symbol, qty=qty, side=side.value, reason="broker_error")
-            raise RuntimeError("No se pudo enviar la orden.") from None
-
-        fill_price = float(getattr(order, "filled_avg_price", None) or price or 0.0)
-        self.journal.record(
-            symbol,
-            side.value,
-            qty,
-            fill_price if fill_price > 0 else float(price or 0.0),
-            entry_price=entry_price,
-            reason=reason,
-            dry_run=False,
-            order_id=str(order.id),
-        )
-        if side is OrderSide.BUY and fill_price > 0:
-            self.position_book.open(
-                symbol,
-                qty,
-                fill_price,
-                stop_price=float(stop_price or fill_price * 0.99),
-                take_profit_price=float(take_profit_price or fill_price * 1.015),
-                stop_pct=float(stop_pct or 0.01),
-                take_profit_pct=float(take_profit_pct or 0.015),
-                dry_run=False,
-            )
+            else:
+                self.position_book.add_fill(symbol, qty, fill_price)
         elif side is OrderSide.SELL:
-            self.position_book.close(symbol)
-        logger.info(
-            "Orden enviada | id=%s | %s %s qty=%s | status=%s",
-            order.id,
-            side.value,
+            pos = self.position_book.get(symbol)
+            ref_qty = float(pos.opened_qty or pos.qty) if pos is not None else abs(float(qty))
+            threshold = dust_threshold_for(self.client.settings, symbol, ref_qty)
+            _updated, _sold, dust_absorbed = self.position_book.apply_sell_fill(
+                symbol, qty, dust_threshold=threshold
+            )
+            if pos is None:
+                logger.warning(
+                    "%s | fill SELL %s sin fila en libro local — qty broker puede diferir",
+                    symbol,
+                    f"{qty:g}",
+                )
+        return dust_absorbed
+
+    def close_position(
+        self,
+        symbol: str,
+        price: float | None = None,
+        reason: str = "close",
+        *,
+        bid: float | None = None,
+        ask: float | None = None,
+        spread_pct: float | None = None,
+        limit_spread_pct: float = 0.0015,
+        attempt: int = 1,
+    ) -> OrderSubmitResult | None:
+        symbol = normalize_symbol(sanitize_symbol(symbol))
+        position = self.get_position(symbol)
+        if position is None:
+            logger.info("No hay posicion abierta en %s", symbol)
+            audit("order_close", "deny", symbol=symbol, reason="no_position")
+            return None
+
+        qty = sanitize_qty(abs(float(position.qty)), fractional=is_crypto_symbol(symbol))
+        side = OrderSide.SELL if float(position.qty) > 0 else OrderSide.BUY
+        entry = float(position.avg_entry_price)
+        logger.info("Cerrando posicion %s qty=%s side=%s motivo=%s", symbol, qty, side.value, reason)
+        audit("order_close", "allow", symbol=symbol, qty=qty, side=side.value, reason=reason)
+        return self.submit_smart_order(
             symbol,
             qty,
-            order.status,
+            side,
+            price=price,
+            entry_price=entry,
+            reason=reason,
+            bid=bid,
+            ask=ask,
+            spread_pct=spread_pct,
+            limit_spread_pct=limit_spread_pct,
+            attempt=attempt,
         )
-        audit("order_submit", "allow", symbol=symbol, qty=qty, side=side.value, order_id=str(order.id))
-        return order
 
     def _require_live_confirm(self, symbol: str, qty: float, side: OrderSide) -> None:
         """Primera orden live (no paper, no dry-run): CONFIRMO en TTY o data/live_confirm.txt."""
@@ -310,33 +788,6 @@ class OrderExecutor:
         if self.notifier is not None:
             self.notifier.notify_live_order_blocked(symbol, side.value, qty, reason)
         raise ValidationError(f"Orden live bloqueada: {reason}")
-
-    def close_position(
-        self,
-        symbol: str,
-        price: float | None = None,
-        reason: str = "close",
-    ) -> Order | dict[str, Any] | None:
-        symbol = sanitize_symbol(symbol)
-        position = self.get_position(symbol)
-        if position is None:
-            logger.info("No hay posicion abierta en %s", symbol)
-            audit("order_close", "deny", symbol=symbol, reason="no_position")
-            return None
-
-        qty = sanitize_qty(abs(float(position.qty)), fractional=is_crypto_symbol(symbol))
-        side = OrderSide.SELL if float(position.qty) > 0 else OrderSide.BUY
-        entry = float(position.avg_entry_price)
-        logger.info("Cerrando posicion %s qty=%s side=%s motivo=%s", symbol, qty, side.value, reason)
-        audit("order_close", "allow", symbol=symbol, qty=qty, side=side.value, reason=reason)
-        return self.submit_market_order(
-            symbol,
-            qty,
-            side,
-            price=price,
-            entry_price=entry,
-            reason=reason,
-        )
 
     def cancel_open_orders(self, symbol: str | None = None) -> int:
         """Cancela órdenes abiertas en Alpaca. Se usa al detener el loop."""

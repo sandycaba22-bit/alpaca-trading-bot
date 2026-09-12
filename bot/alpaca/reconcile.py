@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
 
 from bot.alpaca.client import AlpacaClient
+from bot.alpaca.execution import classify_order
 from bot.notify.telegram import TelegramNotifier
 from bot.security.audit import audit
 from bot.security.exceptions import ValidationError
+from bot.market.assets import normalize_symbol
+from bot.market.dust import effective_qty
+from bot.config import Settings
+from bot.storage.pending_orders import PendingOrderBook, RestingOrder
 from bot.storage.positions import OpenPositionBook
+
+from alpaca.trading.enums import QueryOrderStatus
+from alpaca.trading.requests import GetOrdersRequest
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +30,7 @@ _QTY_REL_TOL = 0.01
 
 def canonical_symbol(raw: str) -> str:
     """BTCUSD (broker) y BTC/USD (libro) son el mismo activo."""
-    symbol = str(raw or "").strip().upper()
-    if not symbol:
-        return ""
-    if "/" in symbol:
-        return symbol
-    if symbol.endswith("USD") and len(symbol) > 3 and symbol[:-3].isalpha():
-        return f"{symbol[:-3]}/USD"
-    return symbol
+    return normalize_symbol(raw)
 
 
 def qty_matches(local_qty: float, broker_qty: float) -> bool:
@@ -47,7 +50,7 @@ class ReconcileMismatch:
     qty_diff: list[str]
 
 
-def broker_qty_map(client: AlpacaClient) -> dict[str, float]:
+def broker_qty_map(client: AlpacaClient, settings: Settings | None = None) -> dict[str, float]:
     client.limiter.acquire("trading_read")
     positions = list(client.trading.get_all_positions())
     out: dict[str, float] = {}
@@ -55,17 +58,38 @@ def broker_qty_map(client: AlpacaClient) -> dict[str, float]:
         key = canonical_symbol(str(getattr(pos, "symbol", "")))
         if not key:
             continue
-        out[key] = abs(float(pos.qty))
+        raw_qty = abs(float(pos.qty))
+        if settings is not None:
+            raw_qty = effective_qty(settings, key, raw_qty, raw_qty)
+        if raw_qty <= 1e-8:
+            continue
+        out[key] = raw_qty
     return out
 
 
-def local_qty_map(book: OpenPositionBook) -> dict[str, float]:
+def local_qty_map(book: OpenPositionBook, settings: Settings | None = None) -> dict[str, float]:
     out: dict[str, float] = {}
+    skipped: list[str] = []
     for pos in book.list():
         key = canonical_symbol(pos.symbol)
         if not key:
             continue
-        out[key] = abs(float(pos.qty))
+        # Dry-run never hits Alpaca; those rows must not fail reconcile.
+        if pos.dry_run:
+            skipped.append(key)
+            continue
+        raw_qty = abs(float(pos.qty))
+        ref = float(pos.opened_qty or pos.qty)
+        if settings is not None:
+            raw_qty = effective_qty(settings, key, raw_qty, ref)
+        if raw_qty <= 1e-8:
+            continue
+        out[key] = raw_qty
+    if skipped:
+        logger.info(
+            "Reconcile omite posiciones dry-run del libro | %s",
+            ",".join(skipped),
+        )
     return out
 
 
@@ -93,10 +117,95 @@ def format_mismatch(mismatch: ReconcileMismatch) -> str:
     return "\n".join(lines)
 
 
+def _order_side(order: Any) -> str:
+    raw = getattr(order, "side", "") or ""
+    text = str(raw)
+    if "." in text:
+        text = text.split(".")[-1]
+    return text.lower()
+
+
+def adopt_open_orders(
+    client: AlpacaClient,
+    book: OpenPositionBook,
+    pending: PendingOrderBook,
+) -> int:
+    """
+    Incorpora órdenes DAY/GTC abiertas del broker al registro de fill pendiente.
+    No cierra el libro: una accepted sin fill no es un cierre.
+    """
+    try:
+        client.limiter.acquire("trading_read")
+        orders = list(
+            client.trading.get_orders(filter=GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        )
+    except Exception as exc:
+        logger.warning("Reconcile no pudo listar órdenes abiertas: %s", type(exc).__name__)
+        return 0
+
+    broker = broker_qty_map(client)
+    adopted = 0
+    for order in orders:
+        order_id = str(getattr(order, "id", "") or "")
+        symbol = canonical_symbol(str(getattr(order, "symbol", "")))
+        if not order_id or not symbol:
+            continue
+        kind = classify_order(order)
+        if kind == "failed":
+            continue
+        side = _order_side(order)
+        qty = float(getattr(order, "qty", 0) or 0)
+        filled_qty = float(getattr(order, "filled_qty", 0) or 0)
+        limit_price = getattr(order, "limit_price", None)
+        status = str(getattr(order, "status", "") or "accepted")
+        is_close = side == "sell" and symbol in broker
+        tracked = book.get(symbol)
+        existing = pending.get(order_id)
+        pending.upsert(
+            RestingOrder(
+                order_id=order_id,
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                reason=(existing.reason if existing else ("mode_switch" if is_close else "signal")),
+                is_close=is_close or bool(existing and existing.is_close),
+                event_id=existing.event_id if existing else "",
+                submitted_at=(
+                    existing.submitted_at
+                    if existing
+                    else datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                ),
+                filled_qty=filled_qty,
+                entry_price=(
+                    existing.entry_price
+                    if existing and existing.entry_price
+                    else (float(tracked.avg_entry_price) if tracked else None)
+                ),
+                signal_price=existing.signal_price if existing else 0.0,
+                order_type=str(getattr(order, "type", "limit") or "limit"),
+                limit_price=float(limit_price) if limit_price else None,
+                last_status=status,
+            )
+        )
+        adopted += 1
+        logger.info(
+            "Reconcile orden en vuelo | %s %s id=%s status=%s filled=%s/%s limit=%s",
+            side,
+            symbol,
+            order_id,
+            status,
+            f"{filled_qty:g}",
+            f"{qty:g}",
+            f"{float(limit_price):.4f}" if limit_price else "—",
+        )
+    return adopted
+
+
 def assert_positions_match(
     client: AlpacaClient,
     book: OpenPositionBook | None = None,
     notifier: TelegramNotifier | None = None,
+    settings: Settings | None = None,
 ) -> None:
     """
     Aborta el arranque si el libro y el broker no coinciden,
@@ -104,7 +213,7 @@ def assert_positions_match(
     """
     book = book or OpenPositionBook()
     try:
-        broker = broker_qty_map(client)
+        broker = broker_qty_map(client, settings)
     except Exception as exc:
         message = (
             "No se pudo leer GET /v2/positions "
@@ -116,7 +225,7 @@ def assert_positions_match(
             notifier.notify_position_mismatch(message)
         raise ValidationError(message) from None
 
-    local = local_qty_map(book)
+    local = local_qty_map(book, settings)
     mismatch = diff_maps(broker, local)
     if mismatch.only_broker or mismatch.only_local or mismatch.qty_diff:
         message = format_mismatch(mismatch)

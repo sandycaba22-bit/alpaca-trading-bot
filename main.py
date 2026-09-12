@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import logging
 import os
 import signal
@@ -11,9 +12,12 @@ import sys
 from bot.alpaca.client import AlpacaClient
 from bot.alpaca.execution import OrderExecutor
 from bot.alpaca.market_data import MarketDataService
-from bot.alpaca.reconcile import assert_positions_match
+from bot.alpaca.reconcile import adopt_open_orders, assert_positions_match
+from bot.backtest.compare_mtf import format_mtf_report, run_mtf_compare
+from bot.backtest.compare_regimes import format_reports, run_compare
 from bot.backtest.optimize import WalkForwardOptimizer
 from bot.market.assets import all_symbols
+from bot.market.dust import refresh_crypto_mins
 from bot.config import load_settings
 from bot.engine import TradingEngine
 from bot.logging_setup import setup_logging
@@ -30,7 +34,8 @@ from bot.storage.control import BotControl
 from bot.storage.journal import TradeJournal
 from bot.storage.params import load_symbol_params
 from bot.storage.positions import OpenPositionBook
-from bot.strategy.sma_crossover import TunedSmaStrategy
+from bot.storage.pending_orders import PendingOrderBook
+from bot.strategy.multi_strategy import MultiStrategyOrchestrator
 
 logger = logging.getLogger("bot")
 
@@ -58,18 +63,57 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Anos de historia para --backtest (por defecto BACKTEST_YEARS)",
     )
+    parser.add_argument(
+        "--compare-strategies",
+        action="store_true",
+        help="Walk-forward 3+3 por estrategia y combinado (no guarda params, no opera)",
+    )
+    parser.add_argument(
+        "--compare-mtf",
+        action="store_true",
+        help="Compara estructura 6m+9m vs 5m+15m (6 anos, SMA crossover, no opera)",
+    )
     return parser.parse_args(argv)
+
+
+def _signal_name(signum: int) -> str:
+    try:
+        return signal.Signals(signum).name
+    except (AttributeError, ValueError):
+        return str(signum)
+
+
+def _request_shutdown(engine: TradingEngine, *, reason: str, signum: int | None = None) -> None:
+    if signum is not None:
+        name = _signal_name(signum)
+        logger.info(
+            "Senal %s (%s) recibida — apagado ordenado con cierre WS",
+            signum,
+            name,
+        )
+        audit("shutdown", "allow", reason=reason, signum=signum, signal=name)
+    else:
+        logger.info("Apagado ordenado con cierre WS (%s)", reason)
+        audit("shutdown", "allow", reason=reason)
+    engine.request_shutdown()
+
+
+def _finalize_shutdown(engine: TradingEngine) -> None:
+    engine.shutdown(timeout=5.0)
+    logging.shutdown()
 
 
 def _install_signal_handlers(engine: TradingEngine) -> None:
     def _handle(signum: int, _frame) -> None:
-        logger.info("Senal %s recibida - apagado ordenado", signum)
-        audit("shutdown", "allow", reason="signal", signum=signum)
-        engine.stop()
+        _request_shutdown(engine, reason="signal", signum=signum)
+
+    atexit.register(_finalize_shutdown, engine)
 
     signal.signal(signal.SIGINT, _handle)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _handle)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _handle)
 
 
 def _run_backtest(settings, client: AlpacaClient, years: int | None) -> int:
@@ -111,6 +155,53 @@ def _run_backtest(settings, client: AlpacaClient, years: int | None) -> int:
     return 0
 
 
+def _run_compare_mtf(settings, client: AlpacaClient) -> int:
+    logging.getLogger("bot.strategy.sma_crossover").setLevel(logging.WARNING)
+    market_data = MarketDataService(client)
+    audit("compare_mtf_start", "allow", years=settings.backtest_years)
+    rows = run_mtf_compare(settings, market_data)
+    report = format_mtf_report(rows)
+    print(report)
+    out = safe_path_under(settings.log_dir, "mtf_compare.txt")
+    out.write_text(report + "\n", encoding="utf-8")
+    logger.info("Informe MTF guardado en %s", out)
+    audit("compare_mtf_end", "allow", rows=len(rows))
+    return 0
+
+
+def _run_compare_strategies(settings, client: AlpacaClient) -> int:
+    market_data = MarketDataService(client)
+    audit("compare_start", "allow", years=settings.backtest_years)
+    quiet = (
+        "bot.strategy.regime_selector",
+        "bot.strategy.breakout",
+        "bot.strategy.mean_reversion",
+        "bot.strategy.pullback",
+        "bot.strategy.squeeze",
+        "bot.strategy.multi_strategy",
+        "bot.backtest.engine",
+        "bot.reporting.pnl",
+    )
+    previous = {name: logging.getLogger(name).level for name in quiet}
+    for name in quiet:
+        logging.getLogger(name).setLevel(logging.WARNING)
+    try:
+        rows = run_compare(settings, market_data)
+    finally:
+        for name, level in previous.items():
+            logging.getLogger(name).setLevel(level)
+    if not rows:
+        logger.error("Compare: sin resultados")
+        return 1
+    text = format_reports(rows)
+    out = safe_path_under(settings.log_dir, "strategy_compare.csv")
+    out.write_text(text + "\n", encoding="utf-8")
+    print(text)
+    logger.info("Compare escrito en %s (%s filas)", out, len(rows))
+    audit("compare_end", "allow", rows=len(rows))
+    return 0
+
+
 def _live_strategy(settings):
     stored = load_symbol_params()
     by_symbol = {
@@ -122,18 +213,28 @@ def _live_strategy(settings):
         key = symbol.upper()
         if key not in by_symbol:
             by_symbol[key] = (settings.crypto_sma_fast, settings.crypto_sma_slow)
+    sma_slow_by_symbol = {sym: slow for sym, (_fast, slow) in by_symbol.items()}
     if by_symbol:
         logger.info(
-            "Estrategia afinada | %s",
-            ", ".join(f"{sym} SMA{fast}/{slow}" for sym, (fast, slow) in by_symbol.items()),
+            "Sesgo SMA lenta | %s",
+            ", ".join(f"{sym} SMA{slow}" for sym, slow in sma_slow_by_symbol.items()),
         )
     else:
         logger.info(
-            "Sin walk-forward previo — SMA %s/%s de .env. Ejecuta python main.py --backtest",
-            settings.sma_fast,
+            "Sesgo SMA lenta | default %s / cripto %s",
             settings.sma_slow,
+            settings.crypto_sma_slow,
         )
-    return TunedSmaStrategy(settings.sma_fast, settings.sma_slow, by_symbol), stored
+    logger.info(
+        "Disparador | multi-regimen | ruptura+pullback+mean-rev+squeeze | "
+        "lookback=%s vol>=%.2fx cooldown=%s | riesgo fijo=%.2f%% | freno diario=%.2f%%",
+        settings.breakout_lookback_periods,
+        settings.breakout_volume_mult,
+        settings.breakout_cooldown_bars,
+        settings.risk_percent_per_trade * 100,
+        settings.daily_loss_limit_pct * 100,
+    )
+    return MultiStrategyOrchestrator(settings, sma_slow_by_symbol), stored
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -152,7 +253,17 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=settings.dry_run,
         symbols=",".join(all_symbols(settings)),
         key=mask_secret(settings.api_key_id),
-        mode="validate" if args.validate else "backtest" if args.backtest else "once" if args.once else "loop",
+        mode="validate"
+        if args.validate
+        else "compare_mtf"
+        if args.compare_mtf
+        else "compare"
+        if args.compare_strategies
+        else "backtest"
+        if args.backtest
+        else "once"
+        if args.once
+        else "loop",
     )
     logger.info(
         "=== Bot trading Alpaca | hibrido acciones+cripto | paper=%s | dry_run=%s ===",
@@ -162,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
 
     client = AlpacaClient(settings)
     snapshot, _clock = client.validate_startup()
+    if not settings.dry_run:
+        refresh_crypto_mins(client, settings)
 
     if args.validate:
         if snapshot is None:
@@ -170,6 +283,20 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Validacion completada")
         audit("validate", "allow")
         return 0
+
+    if args.compare_mtf:
+        try:
+            return _run_compare_mtf(settings, client)
+        except (ValidationError, RateLimitError, SecurityError) as exc:
+            log_caught(logger, "compare_mtf_blocked", exc)
+            return 1
+
+    if args.compare_strategies:
+        try:
+            return _run_compare_strategies(settings, client)
+        except (ValidationError, RateLimitError, SecurityError) as exc:
+            log_caught(logger, "compare_blocked", exc)
+            return 1
 
     if args.backtest:
         try:
@@ -187,11 +314,13 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Telegram desactivado (falta token o chat_id)")
 
     position_book = OpenPositionBook()
+    pending_fills = PendingOrderBook()
     executor = OrderExecutor(
         client,
         dry_run=settings.dry_run,
         journal=TradeJournal(),
         position_book=position_book,
+        pending_fills=pending_fills,
         notifier=notifier,
         live_account_id=snapshot.id if snapshot is not None else "",
     )
@@ -228,7 +357,12 @@ def main(argv: list[str] | None = None) -> int:
                 "la primera orden exigira CONFIRMO (TTY o data/live_confirm.txt)",
                 settings.api_base_url,
             )
-        assert_positions_match(client, book=position_book, notifier=notifier)
+        if not settings.dry_run:
+            n_open = adopt_open_orders(client, position_book, pending_fills)
+            if n_open:
+                logger.info("Reconcile: %s órdenes abiertas adoptadas como pendiente de fill", n_open)
+            engine.settle_resting_orders()
+        assert_positions_match(client, book=position_book, notifier=notifier, settings=settings)
         if args.once:
             engine.run_once()
         else:
@@ -236,10 +370,9 @@ def main(argv: list[str] | None = None) -> int:
             control.set_paused(False)
             _install_signal_handlers(engine)
             engine.run_loop()
+            _finalize_shutdown(engine)
     except KeyboardInterrupt:
-        logger.info("Interrupcion de teclado - saliendo")
-        audit("shutdown", "allow", reason="keyboard")
-        engine.stop()
+        _request_shutdown(engine, reason="keyboard")
     except (ValidationError, RateLimitError, SecurityError) as exc:
         log_caught(logger, "runtime_blocked", exc)
         return 1

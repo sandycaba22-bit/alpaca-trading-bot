@@ -16,6 +16,8 @@ build/
 *.log
 logs/*
 !logs/.gitkeep
+data/*
+!data/.gitkeep
 .DS_Store
 Thumbs.db
 node_modules/

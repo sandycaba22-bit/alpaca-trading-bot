@@ -10,7 +10,8 @@ _PATTERNS = (
     re.compile(r"(?i)(api[_-]?secret|secret[_-]?key|authorization|bearer)[\"'\s:=]+[^\s\"']+"),
     re.compile(r"\bPK[A-Z0-9]{12,}\b"),
     re.compile(r"\bAK[A-Z0-9]{12,}\b"),
-    re.compile(r"(?i)(APCA_API_SECRET_KEY|APCA_API_KEY_ID)\s*=\s*\S+"),
+    re.compile(r"(?i)(APCA_API_SECRET_KEY|APCA_API_KEY_ID|TELEGRAM_BOT_TOKEN)\s*=\s*\S+"),
+    re.compile(r"\b\d{5,16}:[A-Za-z0-9_-]{20,}\b"),
 )
 
 _extra_secrets: list[str] = []

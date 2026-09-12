@@ -19,10 +19,18 @@ from bot.security.sanitize import (
     sanitize_telegram_chat_id,
     sanitize_telegram_token,
     sanitize_timeframe,
+    parse_symbol_float_map,
+    parse_symbol_int_map,
 )
 from bot.security.secrets import register_secret
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _default_dust_cache():
+    from bot.market.dust import DustThresholdCache
+
+    return DustThresholdCache()
 
 
 def _as_bool(value: str | None, default: bool = False) -> bool:
@@ -66,6 +74,12 @@ class Settings:
     atr_stop_mult: float
     momentum_bars: int
     max_spread_pct: float
+    order_limit_spread_pct: float
+    order_retry_max: int
+    order_retry_timeout_seconds: int
+    order_retry_max_sl: int
+    order_retry_timeout_sl_seconds: int
+    order_retry_backoff_seconds: float
     adverse_momentum_pct: float
     backtest_years: int
     backtest_cash: float
@@ -77,6 +91,60 @@ class Settings:
     backtest_train_years: int = 3
     backtest_validate_years: int = 3
     log_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "logs")
+    atr_sl_mult: float = 1.5
+    atr_tp_mult: float = 3.0
+    atr_trailing_mult: float = 2.0
+    adx_period: int = 14
+    adx_threshold: float = 20.0
+    adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
+    adx_filter_enabled: bool = True
+    volume_confirmation_period: int = 20
+    volume_confirmation_mult: float = 1.0
+    confirm_higher_tf: str = "15Min"
+    confirm_momentum_bars: int = 5
+    entry_confirmation_enabled: bool = True
+    telegram_notify_filtered: bool = False
+    breakout_lookback_periods: int = 20
+    breakout_lookback_overrides: dict[str, int] = field(default_factory=dict)
+    breakout_volume_mult: float = 1.5
+    breakout_volume_mult_overrides: dict[str, float] = field(default_factory=dict)
+    breakout_min_range_atr_mult: float = 0.5
+    breakout_min_range_overrides: dict[str, float] = field(default_factory=dict)
+    breakout_cooldown_bars: int = 5
+    breakout_cooldown_overrides: dict[str, int] = field(default_factory=dict)
+    bb_period: int = 20
+    bb_std: float = 2.0
+    rsi_period: int = 14
+    rsi_oversold: float = 30.0
+    rsi_overbought: float = 70.0
+    meanrev_atr_sl_mult: float = 1.0
+    pullback_ema_period: int = 9
+    pullback_volume_mult: float = 1.2
+    squeeze_width_lookback: int = 20
+    squeeze_volume_mult: float = 2.0
+    strategy_collision_priority: str = "breakout"
+    risk_percent_per_trade: float = 0.01
+    daily_loss_limit_pct: float = 0.03
+    use_fixed_risk_sizing: bool = True
+    stream_stale_seconds: float = 120.0
+    stream_data_timeout_seconds: float = 0.0
+    stream_ws_ping_interval: float = 10.0
+    stream_ws_ping_timeout: float = 180.0
+    stream_notify_debounce_seconds: float = 300.0
+    stream_reconnect_min_seconds: float = 2.0
+    stream_reconnect_max_seconds: float = 60.0
+    dynamic_tp_enabled: bool = False
+    dynamic_tp_atr_mult: float = 3.0
+    dynamic_tp_base_pct: float = 0.015
+    dynamic_tp_max_pct: float = 0.20
+    dynamic_tp_gap_sell_pct: float = 0.70
+    dust_threshold_pct: float = 0.0001
+    dust_threshold_min_qty: float = 0.0
+    dust_threshold_crypto_min: float = 0.0001
+    dust_threshold_stock_min: float = 0.0
+    dust_threshold_overrides: dict[str, float] = field(default_factory=dict)
+    dust_threshold_refresh_seconds: int = 3600
+    dust_cache: object = field(default_factory=_default_dust_cache, compare=False, hash=False)
 
     def validate(self) -> None:
         missing: list[str] = []
@@ -201,6 +269,40 @@ def load_settings(env_path: Path | None = None) -> Settings:
         max_spread_pct=bounded_float(
             os.getenv("MAX_SPREAD_PCT"), 0.003, min_value=0.0001, max_value=0.05, name="MAX_SPREAD_PCT"
         ),
+        order_limit_spread_pct=bounded_float(
+            os.getenv("ORDER_LIMIT_SPREAD_PCT"),
+            0.0015,
+            min_value=0.0001,
+            max_value=0.05,
+            name="ORDER_LIMIT_SPREAD_PCT",
+        ),
+        order_retry_max=bounded_int(
+            os.getenv("ORDER_RETRY_MAX"), 8, min_value=1, max_value=30, name="ORDER_RETRY_MAX"
+        ),
+        order_retry_timeout_seconds=bounded_int(
+            os.getenv("ORDER_RETRY_TIMEOUT_SECONDS"),
+            60,
+            min_value=5,
+            max_value=600,
+            name="ORDER_RETRY_TIMEOUT_SECONDS",
+        ),
+        order_retry_max_sl=bounded_int(
+            os.getenv("ORDER_RETRY_MAX_SL"), 5, min_value=1, max_value=30, name="ORDER_RETRY_MAX_SL"
+        ),
+        order_retry_timeout_sl_seconds=bounded_int(
+            os.getenv("ORDER_RETRY_TIMEOUT_SL_SECONDS"),
+            20,
+            min_value=5,
+            max_value=600,
+            name="ORDER_RETRY_TIMEOUT_SL_SECONDS",
+        ),
+        order_retry_backoff_seconds=bounded_float(
+            os.getenv("ORDER_RETRY_BACKOFF_SECONDS"),
+            1.0,
+            min_value=0.2,
+            max_value=30.0,
+            name="ORDER_RETRY_BACKOFF_SECONDS",
+        ),
         adverse_momentum_pct=bounded_float(
             os.getenv("ADVERSE_MOMENTUM_PCT"), 0.008, min_value=0.0001, max_value=0.10, name="ADVERSE_MOMENTUM_PCT"
         ),
@@ -227,9 +329,342 @@ def load_settings(env_path: Path | None = None) -> Settings:
         backtest_validate_years=bounded_int(
             os.getenv("BACKTEST_VALIDATE_YEARS"), 3, min_value=1, max_value=8, name="BACKTEST_VALIDATE_YEARS"
         ),
+        atr_sl_mult=bounded_float(
+            os.getenv("ATR_SL_MULTIPLIER"),
+            bounded_float(os.getenv("ATR_STOP_MULT"), 1.5, min_value=0.5, max_value=5.0, name="ATR_STOP_MULT"),
+            min_value=0.5,
+            max_value=8.0,
+            name="ATR_SL_MULTIPLIER",
+        ),
+        atr_tp_mult=bounded_float(
+            os.getenv("ATR_TP_MULTIPLIER"), 3.0, min_value=0.5, max_value=12.0, name="ATR_TP_MULTIPLIER"
+        ),
+        atr_trailing_mult=bounded_float(
+            os.getenv("ATR_TRAILING_MULTIPLIER"),
+            2.0,
+            min_value=0.5,
+            max_value=8.0,
+            name="ATR_TRAILING_MULTIPLIER",
+        ),
+        adx_period=bounded_int(os.getenv("ADX_PERIOD"), 14, min_value=5, max_value=50, name="ADX_PERIOD"),
+        adx_threshold=bounded_float(
+            os.getenv("ADX_THRESHOLD"), 20.0, min_value=1.0, max_value=80.0, name="ADX_THRESHOLD"
+        ),
+        adx_threshold_overrides=_load_adx_overrides(stock_symbols, crypto_symbols),
+        adx_filter_enabled=_as_bool(os.getenv("ADX_FILTER_ENABLED"), default=True),
+        volume_confirmation_period=bounded_int(
+            os.getenv("VOLUME_CONFIRMATION_PERIOD"),
+            20,
+            min_value=3,
+            max_value=200,
+            name="VOLUME_CONFIRMATION_PERIOD",
+        ),
+        volume_confirmation_mult=bounded_float(
+            os.getenv("VOLUME_CONFIRMATION_MULT"),
+            1.0,
+            min_value=0.1,
+            max_value=5.0,
+            name="VOLUME_CONFIRMATION_MULT",
+        ),
+        confirm_higher_tf=sanitize_timeframe(os.getenv("CONFIRM_HIGHER_TF"), "15Min"),
+        confirm_momentum_bars=bounded_int(
+            os.getenv("CONFIRM_MOMENTUM_BARS"), 5, min_value=2, max_value=30, name="CONFIRM_MOMENTUM_BARS"
+        ),
+        entry_confirmation_enabled=_as_bool(os.getenv("ENTRY_CONFIRMATION_ENABLED"), default=True),
+        telegram_notify_filtered=_as_bool(os.getenv("TELEGRAM_NOTIFY_FILTERED"), default=False),
+        breakout_lookback_periods=bounded_int(
+            os.getenv("BREAKOUT_LOOKBACK_PERIODS"),
+            20,
+            min_value=5,
+            max_value=200,
+            name="BREAKOUT_LOOKBACK_PERIODS",
+        ),
+        breakout_lookback_overrides=_load_int_overrides(
+            "BREAKOUT_LOOKBACK_OVERRIDES",
+            "BREAKOUT_LOOKBACK_",
+            stock_symbols,
+            crypto_symbols,
+            min_value=5,
+            max_value=200,
+        ),
+        breakout_volume_mult=bounded_float(
+            os.getenv("BREAKOUT_VOLUME_MULT"),
+            1.5,
+            min_value=0.5,
+            max_value=8.0,
+            name="BREAKOUT_VOLUME_MULT",
+        ),
+        breakout_volume_mult_overrides=_load_float_overrides(
+            "BREAKOUT_VOLUME_MULT_OVERRIDES",
+            "BREAKOUT_VOLUME_MULT_",
+            stock_symbols,
+            crypto_symbols,
+            min_value=0.5,
+            max_value=8.0,
+        ),
+        breakout_min_range_atr_mult=bounded_float(
+            os.getenv("BREAKOUT_MIN_RANGE_ATR_MULT"),
+            0.5,
+            min_value=0.1,
+            max_value=5.0,
+            name="BREAKOUT_MIN_RANGE_ATR_MULT",
+        ),
+        breakout_min_range_overrides=_load_float_overrides(
+            "BREAKOUT_MIN_RANGE_OVERRIDES",
+            "BREAKOUT_MIN_RANGE_ATR_MULT_",
+            stock_symbols,
+            crypto_symbols,
+            min_value=0.1,
+            max_value=5.0,
+        ),
+        breakout_cooldown_bars=bounded_int(
+            os.getenv("BREAKOUT_COOLDOWN_BARS"),
+            5,
+            min_value=1,
+            max_value=50,
+            name="BREAKOUT_COOLDOWN_BARS",
+        ),
+        breakout_cooldown_overrides=_load_int_overrides(
+            "BREAKOUT_COOLDOWN_OVERRIDES",
+            "BREAKOUT_COOLDOWN_",
+            stock_symbols,
+            crypto_symbols,
+            min_value=1,
+            max_value=50,
+        ),
+        bb_period=bounded_int(os.getenv("BB_PERIOD"), 20, min_value=5, max_value=80, name="BB_PERIOD"),
+        bb_std=bounded_float(os.getenv("BB_STD"), 2.0, min_value=0.5, max_value=4.0, name="BB_STD"),
+        rsi_period=bounded_int(os.getenv("RSI_PERIOD"), 14, min_value=5, max_value=50, name="RSI_PERIOD"),
+        rsi_oversold=bounded_float(
+            os.getenv("RSI_OVERSOLD"), 30.0, min_value=5.0, max_value=45.0, name="RSI_OVERSOLD"
+        ),
+        rsi_overbought=bounded_float(
+            os.getenv("RSI_OVERBOUGHT"), 70.0, min_value=55.0, max_value=95.0, name="RSI_OVERBOUGHT"
+        ),
+        meanrev_atr_sl_mult=bounded_float(
+            os.getenv("MEANREV_ATR_SL_MULT"), 1.0, min_value=0.4, max_value=3.0, name="MEANREV_ATR_SL_MULT"
+        ),
+        pullback_ema_period=bounded_int(
+            os.getenv("PULLBACK_EMA_PERIOD"), 9, min_value=3, max_value=50, name="PULLBACK_EMA_PERIOD"
+        ),
+        pullback_volume_mult=bounded_float(
+            os.getenv("PULLBACK_VOLUME_MULT"), 1.2, min_value=0.5, max_value=5.0, name="PULLBACK_VOLUME_MULT"
+        ),
+        squeeze_width_lookback=bounded_int(
+            os.getenv("SQUEEZE_WIDTH_LOOKBACK"), 20, min_value=5, max_value=80, name="SQUEEZE_WIDTH_LOOKBACK"
+        ),
+        squeeze_volume_mult=bounded_float(
+            os.getenv("SQUEEZE_VOLUME_MULT"), 2.0, min_value=1.0, max_value=8.0, name="SQUEEZE_VOLUME_MULT"
+        ),
+        strategy_collision_priority=(
+            os.getenv("STRATEGY_COLLISION_PRIORITY", "breakout").strip().lower() or "breakout"
+        ),
+        risk_percent_per_trade=bounded_float(
+            os.getenv("RISK_PERCENT_PER_TRADE"),
+            0.01,
+            min_value=0.001,
+            max_value=0.05,
+            name="RISK_PERCENT_PER_TRADE",
+        ),
+        daily_loss_limit_pct=bounded_float(
+            os.getenv("DAILY_LOSS_LIMIT_PERCENT"),
+            0.03,
+            min_value=0.005,
+            max_value=0.20,
+            name="DAILY_LOSS_LIMIT_PERCENT",
+        ),
+        use_fixed_risk_sizing=_as_bool(os.getenv("USE_FIXED_RISK_SIZING"), default=True),
+        stream_stale_seconds=bounded_float(
+            os.getenv("STREAM_STALE_SECONDS"),
+            120.0,
+            min_value=30.0,
+            max_value=600.0,
+            name="STREAM_STALE_SECONDS",
+        ),
+        stream_data_timeout_seconds=bounded_float(
+            os.getenv("STREAM_DATA_TIMEOUT_SECONDS"),
+            0.0,
+            min_value=0.0,
+            max_value=600.0,
+            name="STREAM_DATA_TIMEOUT_SECONDS",
+        ),
+        stream_ws_ping_interval=bounded_float(
+            os.getenv("STREAM_WS_PING_INTERVAL"),
+            10.0,
+            min_value=5.0,
+            max_value=60.0,
+            name="STREAM_WS_PING_INTERVAL",
+        ),
+        stream_ws_ping_timeout=bounded_float(
+            os.getenv("STREAM_WS_PING_TIMEOUT"),
+            180.0,
+            min_value=20.0,
+            max_value=300.0,
+            name="STREAM_WS_PING_TIMEOUT",
+        ),
+        stream_notify_debounce_seconds=bounded_float(
+            os.getenv("STREAM_NOTIFY_DEBOUNCE_SECONDS"),
+            300.0,
+            min_value=60.0,
+            max_value=1800.0,
+            name="STREAM_NOTIFY_DEBOUNCE_SECONDS",
+        ),
+        stream_reconnect_min_seconds=bounded_float(
+            os.getenv("STREAM_RECONNECT_MIN_SECONDS"),
+            2.0,
+            min_value=1.0,
+            max_value=30.0,
+            name="STREAM_RECONNECT_MIN_SECONDS",
+        ),
+        stream_reconnect_max_seconds=bounded_float(
+            os.getenv("STREAM_RECONNECT_MAX_SECONDS"),
+            60.0,
+            min_value=5.0,
+            max_value=300.0,
+            name="STREAM_RECONNECT_MAX_SECONDS",
+        ),
+        dynamic_tp_enabled=_as_bool(os.getenv("DYNAMIC_TP_ENABLED"), default=False),
+        dynamic_tp_atr_mult=bounded_float(
+            os.getenv("DYNAMIC_TP_ATR_MULT"),
+            3.0,
+            min_value=0.5,
+            max_value=10.0,
+            name="DYNAMIC_TP_ATR_MULT",
+        ),
+        dynamic_tp_base_pct=bounded_float(
+            os.getenv("DYNAMIC_TP_BASE_PCT"),
+            bounded_float(os.getenv("TAKE_PROFIT_PCT"), 0.015, min_value=0.001, max_value=0.5, name="TAKE_PROFIT_PCT"),
+            min_value=0.001,
+            max_value=0.5,
+            name="DYNAMIC_TP_BASE_PCT",
+        ),
+        dynamic_tp_max_pct=bounded_float(
+            os.getenv("DYNAMIC_TP_MAX_PCT"),
+            0.20,
+            min_value=0.005,
+            max_value=0.5,
+            name="DYNAMIC_TP_MAX_PCT",
+        ),
+        dynamic_tp_gap_sell_pct=bounded_float(
+            os.getenv("DYNAMIC_TP_GAP_SELL_PCT"),
+            0.70,
+            min_value=0.1,
+            max_value=0.95,
+            name="DYNAMIC_TP_GAP_SELL_PCT",
+        ),
+        dust_threshold_pct=bounded_float(
+            os.getenv("DUST_THRESHOLD_PCT"),
+            0.0001,
+            min_value=0.0,
+            max_value=0.05,
+            name="DUST_THRESHOLD_PCT",
+        ),
+        dust_threshold_min_qty=bounded_float(
+            os.getenv("DUST_THRESHOLD_MIN_QTY"),
+            0.0,
+            min_value=0.0,
+            max_value=1000.0,
+            name="DUST_THRESHOLD_MIN_QTY",
+        ),
+        dust_threshold_crypto_min=bounded_float(
+            os.getenv("DUST_THRESHOLD_CRYPTO_MIN"),
+            0.0001,
+            min_value=0.0,
+            max_value=1.0,
+            name="DUST_THRESHOLD_CRYPTO_MIN",
+        ),
+        dust_threshold_stock_min=bounded_float(
+            os.getenv("DUST_THRESHOLD_STOCK_MIN"),
+            0.0,
+            min_value=0.0,
+            max_value=100.0,
+            name="DUST_THRESHOLD_STOCK_MIN",
+        ),
+        dust_threshold_overrides=_load_dust_overrides(stock_symbols, crypto_symbols),
+        dust_threshold_refresh_seconds=bounded_int(
+            os.getenv("DUST_THRESHOLD_REFRESH_SECONDS"),
+            3600,
+            min_value=0,
+            max_value=86400 * 7,
+            name="DUST_THRESHOLD_REFRESH_SECONDS",
+        ),
     )
     settings.validate()
     return settings
+
+
+def _load_adx_overrides(stock_symbols: list[str], crypto_symbols: list[str]) -> dict[str, float]:
+    return _load_float_overrides(
+        "ADX_THRESHOLD_OVERRIDES",
+        "ADX_THRESHOLD_",
+        stock_symbols,
+        crypto_symbols,
+        min_value=1.0,
+        max_value=80.0,
+    )
+
+
+def _load_float_overrides(
+    map_env: str,
+    prefix: str,
+    stock_symbols: list[str],
+    crypto_symbols: list[str],
+    *,
+    min_value: float,
+    max_value: float,
+) -> dict[str, float]:
+    overrides = parse_symbol_float_map(
+        os.getenv(map_env),
+        min_value=min_value,
+        max_value=max_value,
+        name=map_env,
+    )
+    for symbol in list(stock_symbols) + list(crypto_symbols):
+        env_name = prefix + str(symbol).replace("/", "_")
+        raw = os.getenv(env_name)
+        if raw is None or not str(raw).strip():
+            continue
+        overrides[str(symbol).upper()] = bounded_float(
+            raw, min_value, min_value=min_value, max_value=max_value, name=env_name
+        )
+    return overrides
+
+
+def _load_dust_overrides(stock_symbols: list[str], crypto_symbols: list[str]) -> dict[str, float]:
+    return _load_float_overrides(
+        "DUST_THRESHOLD_OVERRIDES",
+        "DUST_THRESHOLD_",
+        stock_symbols,
+        crypto_symbols,
+        min_value=0.0,
+        max_value=1000.0,
+    )
+
+
+def _load_int_overrides(
+    map_env: str,
+    prefix: str,
+    stock_symbols: list[str],
+    crypto_symbols: list[str],
+    *,
+    min_value: int,
+    max_value: int,
+) -> dict[str, int]:
+    overrides = parse_symbol_int_map(
+        os.getenv(map_env),
+        min_value=min_value,
+        max_value=max_value,
+        name=map_env,
+    )
+    for symbol in list(stock_symbols) + list(crypto_symbols):
+        env_name = prefix + str(symbol).replace("/", "_")
+        raw = os.getenv(env_name)
+        if raw is None or not str(raw).strip():
+            continue
+        overrides[str(symbol).upper()] = bounded_int(
+            raw, min_value, min_value=min_value, max_value=max_value, name=env_name
+        )
+    return overrides
 
 
 def url_host(url: str) -> str:
