@@ -311,6 +311,7 @@ class MultiTimeframeEngine:
             has_long,
             last_price,
             tape.spread_pct if tape else None,
+            htf_trend=cache.trend,
         )
         cache.signal = signal
         cache.signal_detail = detail

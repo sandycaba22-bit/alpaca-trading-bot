@@ -15,6 +15,7 @@ from bot.reporting.pnl import PnLEvent, PerformanceReporter, compute_pnl
 from bot.risk.stops import ExitReason, StopTakeProfitPolicy
 from bot.strategy.base import Signal, Strategy, StrategyContext
 from bot.strategy.indicators import classify_regime, last_atr, momentum_pct
+from bot.strategy.multi_tf_analysis import analyze_trend
 from bot.strategy.price_flow import PriceFlowFilter
 from bot.security.errors import log_caught
 from bot.storage.breakout_state import BreakoutStateStore
@@ -274,6 +275,7 @@ class BacktestEngine:
         return BacktestResult(symbol=symbol, trades=trades, equity=equity, bars=bars, signals=signals)
 
     def _signal(self, symbol: str, hist: pd.DataFrame, has_long: bool, last_price: float) -> Signal:
+        htf_trend, _ret = analyze_trend(hist)
         ctx = StrategyContext(
             symbol=symbol,
             bars=hist,
@@ -283,6 +285,7 @@ class BacktestEngine:
             spread_pct=0.0,
             momentum_pct=momentum_pct(hist["close"], self.settings.momentum_bars),
             atr=last_atr(hist, self.settings.atr_period),
+            htf_trend=htf_trend,
         )
         signal = self.strategy.generate_signal(ctx)
         if signal is Signal.HOLD:

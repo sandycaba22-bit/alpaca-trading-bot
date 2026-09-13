@@ -69,6 +69,7 @@ def analyze_signal(
     has_long: bool,
     last_price: float,
     spread_pct: float | None,
+    htf_trend: str | None = None,
 ) -> tuple[Signal, str]:
     if bars.empty:
         return Signal.HOLD, "sin barras"
@@ -81,6 +82,7 @@ def analyze_signal(
         spread_pct=spread_pct,
         momentum_pct=momentum_pct(bars["close"], 5),
         atr=last_atr(bars, 14),
+        htf_trend=htf_trend,
     )
     signal = strategy.generate_signal(ctx)
     detail = str(getattr(strategy, "last_detail", "") or "").strip()

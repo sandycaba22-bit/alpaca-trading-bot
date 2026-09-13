@@ -25,6 +25,7 @@ class StrategyContext:
     spread_pct: float | None = None
     momentum_pct: float | None = None
     atr: float | None = None
+    htf_trend: str | None = None
 
 
 class Strategy(ABC):

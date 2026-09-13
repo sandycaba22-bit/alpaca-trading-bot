@@ -1,4 +1,4 @@
-"""Orquesta las 4 estrategias según el régimen. No modifica breakout.py."""
+"""Orquesta las estrategias según el régimen. No modifica breakout.py."""
 
 from __future__ import annotations
 
@@ -11,7 +11,13 @@ from bot.strategy.base import Signal, Strategy, StrategyContext
 from bot.strategy.breakout import BreakoutStrategy, detect_breakout
 from bot.strategy.mean_reversion import detect_mean_reversion
 from bot.strategy.pullback import detect_pullback
-from bot.strategy.regime_selector import RegimeSnapshot, StrategyId, select_regime
+from bot.strategy.trend_pullback import detect_trend_pullback
+from bot.strategy.regime_selector import (
+    MarketRegime,
+    RegimeSnapshot,
+    StrategyId,
+    select_regime,
+)
 from bot.strategy.signal_filters import SignalFilterLayer
 from bot.strategy.squeeze import detect_squeeze
 
@@ -44,6 +50,7 @@ class MultiStrategyOrchestrator(Strategy):
         self.last_sl_mult: float | None = None
         self.last_regime: RegimeSnapshot | None = None
         self.force_strategy: StrategyId | None = None
+        self.enable_trend_pullback = True
 
     def slow_period(self, symbol: str) -> int:
         return self.breakout.slow_period(symbol)
@@ -108,7 +115,26 @@ class MultiStrategyOrchestrator(Strategy):
                     StrategyPick(raw, StrategyId.PULLBACK, detail, regime, None)
                 )
 
-        if StrategyId.MEAN_REV in enabled:
+        want_trend_pb = (
+            self.enable_trend_pullback or self.force_strategy is StrategyId.TREND_PULLBACK
+        )
+        if want_trend_pb and StrategyId.TREND_PULLBACK in enabled:
+            raw, detail = detect_trend_pullback(
+                ctx.bars,
+                settings=self.settings,
+                has_long=ctx.has_long_position,
+                symbol=ctx.symbol,
+                htf_trend=ctx.htf_trend,
+            )
+            if raw is not Signal.HOLD:
+                candidates.append(
+                    StrategyPick(raw, StrategyId.TREND_PULLBACK, detail, regime, None)
+                )
+
+        if StrategyId.MEAN_REV in enabled and regime.regime in (
+            MarketRegime.RANGE,
+            MarketRegime.SQUEEZE,
+        ):
             raw, detail = detect_mean_reversion(
                 ctx.bars,
                 settings=self.settings,
@@ -165,6 +191,7 @@ class MultiStrategyOrchestrator(Strategy):
         if priority == "pullback":
             order = (
                 StrategyId.PULLBACK,
+                StrategyId.TREND_PULLBACK,
                 StrategyId.BREAKOUT,
                 StrategyId.SQUEEZE,
                 StrategyId.MEAN_REV,
@@ -173,6 +200,7 @@ class MultiStrategyOrchestrator(Strategy):
             order = (
                 StrategyId.BREAKOUT,
                 StrategyId.PULLBACK,
+                StrategyId.TREND_PULLBACK,
                 StrategyId.SQUEEZE,
                 StrategyId.MEAN_REV,
             )

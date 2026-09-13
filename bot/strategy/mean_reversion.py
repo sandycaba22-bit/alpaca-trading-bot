@@ -13,13 +13,13 @@ from bot.strategy.indicators import bollinger, last_rsi
 logger = logging.getLogger(__name__)
 
 
-def detect_mean_reversion(
+def mean_reversion_criteria(
     bars: pd.DataFrame,
     *,
     settings: Settings,
     has_long: bool,
-    symbol: str = "",
 ) -> tuple[Signal, str]:
+    """Criterio RSI + toque de banda/media. Sin logs (reutilizado por otras estrategias)."""
     if bars is None or bars.empty or "close" not in bars.columns:
         return Signal.HOLD, "mean-rev sin barras"
     period = int(settings.bb_period)
@@ -46,15 +46,26 @@ def detect_mean_reversion(
             f"mean-rev BUY | toca banda inf {band_lo:.4f} close={close:.4f} "
             f"RSI={rsi_value:.1f}<={settings.rsi_oversold:.0f}"
         )
-        logger.info("%s | %s", symbol or "?", why)
         return Signal.BUY, why
     if touched_high and rsi_value >= settings.rsi_overbought and has_long:
         why = (
             f"mean-rev SELL | toca banda sup {band_hi:.4f} close={close:.4f} "
             f"RSI={rsi_value:.1f}>={settings.rsi_overbought:.0f}"
         )
-        logger.info("%s | %s", symbol or "?", why)
         return Signal.SELL, why
     return Signal.HOLD, (
         f"mean-rev sin toque | RSI={rsi_value:.1f} mid={float(mid.iloc[-1]):.4f}"
     )
+
+
+def detect_mean_reversion(
+    bars: pd.DataFrame,
+    *,
+    settings: Settings,
+    has_long: bool,
+    symbol: str = "",
+) -> tuple[Signal, str]:
+    raw, why = mean_reversion_criteria(bars, settings=settings, has_long=has_long)
+    if raw is not Signal.HOLD:
+        logger.info("%s | %s", symbol or "?", why)
+    return raw, why

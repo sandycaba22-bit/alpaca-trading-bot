@@ -25,6 +25,7 @@ class StrategyId(str, Enum):
     BREAKOUT = "breakout"
     MEAN_REV = "mean_reversion"
     PULLBACK = "pullback"
+    TREND_PULLBACK = "trend_pullback"
     SQUEEZE = "squeeze"
 
 
@@ -72,7 +73,7 @@ def select_regime(symbol: str, bars: pd.DataFrame, settings: Settings) -> Regime
         )
     elif adx_value is not None and adx_value > threshold:
         regime = MarketRegime.TREND
-        enabled = (StrategyId.BREAKOUT, StrategyId.PULLBACK)
+        enabled = (StrategyId.BREAKOUT, StrategyId.PULLBACK, StrategyId.TREND_PULLBACK)
         reason = f"ADX {adx_value:.1f} > {threshold:.1f}"
     elif adx_value is not None:
         regime = MarketRegime.RANGE
