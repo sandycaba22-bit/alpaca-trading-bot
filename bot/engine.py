@@ -1212,11 +1212,12 @@ class TradingEngine:
 
         qty = float(position.qty)
         entry = float(position.avg_entry_price)
+        md_symbol = normalize_symbol(symbol)
         bars = self.market_data.get_bars(
-            symbol, self.settings.bar_timeframe, self.settings.lookback_bars
+            md_symbol, self.settings.bar_timeframe, self.settings.lookback_bars
         )
         fallback = float(bars["close"].iloc[-1]) if not bars.empty else entry
-        tape = self.market_data.get_live_tape(symbol, fallback_price=fallback)
+        tape = self.market_data.get_live_tape(md_symbol, fallback_price=fallback)
         rest_last = tape.last_price if tape else fallback
         last_price = self.latest_price(symbol, rest_last)
         atr_value = last_atr(bars, self.settings.atr_period) if not bars.empty else None
@@ -1224,7 +1225,7 @@ class TradingEngine:
 
         trail_tf = _trailing_bar_timeframe(symbol)
         try:
-            trail_bars = self.market_data.get_bars(symbol, trail_tf, 8)
+            trail_bars = self.market_data.get_bars(md_symbol, trail_tf, 8)
         except Exception:
             trail_bars = bars
         peak_price = _current_bar_high(trail_bars, last_price)
@@ -1446,9 +1447,10 @@ class TradingEngine:
                 self.executor.position_book.close(symbol)
                 continue
             entry = float(pos.avg_entry_price)
-            bars = self.market_data.get_bars(symbol, "6Min" if is_crypto_symbol(symbol) else "15Min", 30)
+            md_symbol = normalize_symbol(symbol)
+            bars = self.market_data.get_bars(md_symbol, "6Min" if is_crypto_symbol(symbol) else "15Min", 30)
             fallback = float(bars["close"].iloc[-1]) if not bars.empty else entry
-            tape = self.market_data.get_live_tape(symbol, fallback_price=fallback)
+            tape = self.market_data.get_live_tape(md_symbol, fallback_price=fallback)
             last_price = tape.last_price if tape else fallback
             try:
                 if self._close_and_report(symbol, qty, entry, last_price, "mode_switch"):
