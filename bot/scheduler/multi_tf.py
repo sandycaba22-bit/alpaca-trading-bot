@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 STATE_PATH = PROJECT_ROOT / "data" / "scheduler_state.json"
 
 LAYER_NAMES = ("3m", "6m", "9m")
+CRYPTO_SYMBOL_QUERY_DELAY_SECONDS = 1.0
 
 _TF_SECONDS = {
     "1Min": 60,
@@ -217,7 +218,8 @@ class MultiTimeframeEngine:
 
     def _layer_3m(self) -> None:
         settings = self.engine.settings
-        for symbol in self.active_symbols:
+        symbols = list(self.active_symbols)
+        for index, symbol in enumerate(symbols):
             try:
                 spike_tf = self._spike_timeframe(symbol)
                 lookback = 2 if is_crypto_symbol(symbol) else 3
@@ -242,10 +244,12 @@ class MultiTimeframeEngine:
                     logger.warning("%s | spike tf=%s | %s", symbol, spike_tf, spike.reason)
             except Exception as exc:
                 logger.debug("%s | capa 3m fallo: %s", symbol, exc)
+            self._sleep_between_crypto_symbols(symbols, index)
 
     def _layer_9m(self) -> None:
         settings = self.engine.settings
-        for symbol in self.active_symbols:
+        symbols = list(self.active_symbols)
+        for index, symbol in enumerate(symbols):
             try:
                 regime_tf = self._regime_timeframe(symbol)
                 bars = self.engine.market_data.get_bars(symbol, regime_tf, 80)
@@ -274,6 +278,7 @@ class MultiTimeframeEngine:
                 )
             except Exception as exc:
                 logger.debug("%s | capa 9m fallo: %s", symbol, exc)
+            self._sleep_between_crypto_symbols(symbols, index)
 
     def _layer_6m_execute(self) -> None:
         engine = self.engine
@@ -283,15 +288,18 @@ class MultiTimeframeEngine:
             logger.debug("Capa 6m sin snapshot de cuenta — solo mark-to-market")
         positions = {pos.symbol: pos for pos in engine.executor.list_positions()}
 
-        for symbol in positions:
+        position_symbols = list(positions)
+        for index, symbol in enumerate(position_symbols):
             if engine.control.is_paused():
                 return
             try:
                 engine._mark_to_market(symbol, positions, clock)
             except Exception:
                 pass
+            self._sleep_between_crypto_symbols(position_symbols, index)
 
-        for symbol in self.active_symbols:
+        active_symbols = list(self.active_symbols)
+        for index, symbol in enumerate(active_symbols):
             if not is_symbol_tradable(symbol, clock):
                 continue
             if engine.control.is_paused():
@@ -300,9 +308,11 @@ class MultiTimeframeEngine:
                 engine._mark_to_market(symbol, positions, clock)
             except Exception:
                 pass
+            self._sleep_between_crypto_symbols(active_symbols, index)
 
         positions = {pos.symbol: pos for pos in engine.executor.list_positions()}
-        for symbol in self.active_symbols:
+        active_symbols = list(self.active_symbols)
+        for index, symbol in enumerate(active_symbols):
             if engine.control.is_paused():
                 return
             if not is_symbol_tradable(symbol, clock):
@@ -310,6 +320,7 @@ class MultiTimeframeEngine:
             if account is None:
                 continue
             self._process_6m_symbol(symbol, account, positions)
+            self._sleep_between_crypto_symbols(active_symbols, index)
 
     def _process_6m_symbol(
         self,
@@ -492,6 +503,22 @@ class MultiTimeframeEngine:
         if is_crypto_symbol(symbol):
             return self.engine.settings.crypto_regime_timeframe
         return self.engine.settings.confirm_higher_tf
+
+    def _sleep_between_crypto_symbols(self, symbols: list[str], index: int) -> None:
+        if index >= len(symbols) - 1:
+            return
+        current = symbols[index]
+        remaining = symbols[index + 1 :]
+        if not is_crypto_symbol(current):
+            return
+        if not any(is_crypto_symbol(symbol) for symbol in remaining):
+            return
+        logger.debug(
+            "%s | pausa secuencial %.1fs entre consultas cripto",
+            current,
+            CRYPTO_SYMBOL_QUERY_DELAY_SECONDS,
+        )
+        time.sleep(CRYPTO_SYMBOL_QUERY_DELAY_SECONDS)
 
     def _sync_intervals_for_mode(self, *, reset: bool = False) -> None:
         if self.trading_mode is TradingMode.CRYPTO:
