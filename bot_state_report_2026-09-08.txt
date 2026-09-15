@@ -1,0 +1,447 @@
+REPORTE ESTADO BOT TRADING
+Generado: 2026-09-08 22:51 America/New_York
+Fuente logs: C:\Users\sandy\bot-trading\logs\bot.log
+Criterio seccion 1: ultimas 4 horas (206 lineas) > ultimos 100. Se incluyen las 206.
+Rango: 2026-09-08 18:53:18 ET a 2026-09-08 22:50:43 ET
+
+================================================================
+1) LOGS CRUDOS (ultimas 4 horas, bot.log INFO+)
+================================================================
+NOTA DE CODIGO: bot/scheduler/multi_tf.py linea 331 loguea HOLD 6m en DEBUG, no INFO.
+Las evaluaciones 6m con signal=hold no aparecen en estos logs. El snapshot persistido
+de la ultima evaluacion 6m esta en seccion 4 (scheduler_state.json signal/signal_detail).
+
+2026-09-08 18:53:18 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.02% | tendencia=bear 0.08% | macro 9m sideways +0.1%
+2026-09-08 18:53:18 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.07% | tendencia=bull 0.13% | macro 9m sideways +0.2%
+2026-09-08 19:03:18 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.03% | tendencia=bull 0.04% | macro 9m sideways -0.1%
+2026-09-08 19:03:18 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.17% | tendencia=bull 0.18% | macro 9m sideways -0.1%
+2026-09-08 19:12:18 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways -0.15% | tendencia=bear -0.10% | macro 9m sideways -0.0%
+2026-09-08 19:12:18 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.05% | tendencia=bull 0.02% | macro 9m sideways -0.0%
+2026-09-08 19:21:19 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways -0.02% | tendencia=bull -0.15% | macro 9m sideways -0.0%
+2026-09-08 19:21:19 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.11% | tendencia=bull -0.03% | macro 9m sideways +0.0%
+2026-09-08 19:28:21 | INFO     | bot.strategy.sma_crossover | BTC/USD | cruce alcista (golden cross) -> BUY
+2026-09-08 19:28:21 | INFO     | bot.risk.manager | Riesgo OK | BTC/USD BUY qty=0.025493 notional~2000.02 (5.0% equity)
+2026-09-08 19:28:21 | INFO     | bot.storage.positions | Posicion abierta | BTC/USD qty=0.025493 entry=78453.5950 SL=76884.5231 (2.00%) TP=82376.2748 (5.00%)
+2026-09-08 19:28:21 | INFO     | bot.alpaca.execution | Orden enviada | id=9fe4446b-cde2-4547-afbe-039cff41b2c6 | buy BTC/USD qty=0.025493 | status=OrderStatus.PENDING_NEW
+2026-09-08 19:28:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTC/USD | ABIERTA | long qty=0.025493 | neto +$0.00 | +0.00% | invertido $2,000.02 | entry=78453.5950 last=78453.5950
+2026-09-08 19:28:22 | INFO     | bot.notify.telegram | Telegram mensaje enviado
+2026-09-08 19:31:20 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways -0.09% | tendencia=bear -0.03% | macro 9m sideways -0.0%
+2026-09-08 19:31:20 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.07% | tendencia=bull 0.15% | macro 9m sideways +0.1%
+2026-09-08 19:31:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:34:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:38:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:41:20 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.05% | tendencia=bear -0.09% | macro 9m sideways -0.1%
+2026-09-08 19:41:20 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.07% | tendencia=bull 0.15% | macro 9m sideways +0.1%
+2026-09-08 19:41:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:44:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:47:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:50:20 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways -0.25% | tendencia=bear 0.03% | macro 9m sideways -0.1%
+2026-09-08 19:50:20 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.21% | tendencia=bull 0.10% | macro 9m sideways +0.0%
+2026-09-08 19:50:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:53:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:56:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:59:20 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways -0.03% | tendencia=bear -0.23% | macro 9m sideways -0.1%
+2026-09-08 19:59:20 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways -0.13% | tendencia=bear 0.17% | macro 9m sideways +0.0%
+2026-09-08 19:59:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 19:59:22 | INFO     | bot.strategy.sma_crossover | ETH/USD | cruce alcista (golden cross) -> BUY
+2026-09-08 19:59:22 | INFO     | bot.scheduler.multi_tf | ETH/USD | BUY bloqueado — tendencia 9m bajista
+2026-09-08 20:02:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:05:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:08:20 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.15% | tendencia=bear 0.19% | macro 9m sideways +0.1%
+2026-09-08 20:08:20 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.42% | tendencia=bull 0.20% | macro 9m sideways +0.3%
+2026-09-08 20:08:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:11:22 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:11:23 | INFO     | bot.strategy.sma_crossover | BTC/USD | cruce alcista (golden cross) -> BUY
+2026-09-08 20:11:23 | INFO     | bot.scheduler.multi_tf | BTC/USD | BUY bloqueado — tendencia 9m bajista
+2026-09-08 20:14:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:17:20 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.23% | tendencia=bull 0.22% | macro 9m sideways +0.1%
+2026-09-08 20:17:20 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.36% | tendencia=bull 0.42% | macro 9m sideways +0.3%
+2026-09-08 20:18:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:21:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:24:23 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:26:20 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.21% | tendencia=bull 0.19% | macro 9m sideways +0.2%
+2026-09-08 20:26:20 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.29% | tendencia=bull 0.31% | macro 9m sideways +0.3%
+2026-09-08 20:28:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:31:20 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:32:20 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:35:20 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.14% | tendencia=bull 0.19% | macro 9m sideways +0.1%
+2026-09-08 20:35:20 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.21% | tendencia=bull 0.21% | macro 9m sideways +0.4%
+2026-09-08 20:35:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:37:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:38:20 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:42:21 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:43:20 | INFO     | bot.reporting.pnl | P&L [NEUTRO] BTCUSD | ACTUALIZADA | long qty=0.0254293 | neto +$0.00 | +0.00% | invertido $1,996.19 | entry=78499.7000 last=78499.7000
+2026-09-08 20:43:29 | INFO     | bot | === Bot trading Alpaca | hibrido acciones+cripto | dry_run=True ===
+2026-09-08 20:43:29 | INFO     | bot.alpaca.client | Cliente Alpaca inicializado | paper=True | base_url=https://paper-api.alpaca.markets | key=PK***J6IM
+2026-09-08 20:43:29 | INFO     | bot.alpaca.client | Validando conexion con Alpaca (modo hibrido)...
+2026-09-08 20:43:30 | INFO     | bot.alpaca.client | Conexion OK | paper=True | status=AccountStatus.ACTIVE | equity=99998.14 USD | buying_power=391995.24 | cash=97998.81 | mercado_acciones=cerrado
+2026-09-08 20:43:30 | INFO     | bot.alpaca.client | Mercado de acciones cerrado — modo cripto activo si corresponde
+2026-09-08 20:43:30 | INFO     | bot | Estrategia afinada | AAPL SMA15/30, MSFT SMA10/30, BTC/USD SMA9/21, ETH/USD SMA9/21
+2026-09-08 20:43:30 | INFO     | bot | Telegram configurado — verificacion en segundo plano al entrar al loop
+2026-09-08 20:43:30 | INFO     | bot.engine | Motor Tesla 3-6-9 | Modo Cripto Nocturno/Fin de Semana | activos=BTC/USD,ETH/USD | acciones=AAPL,MSFT | cripto=BTC/USD,ETH/USD | tick=60s | capas 3m=180s 6m=360s 9m=540s | dry_run=True | SL=2.00% TP=5.00% | posiciones=1
+2026-09-08 20:43:30 | INFO     | bot.engine | Telegram: arranque async (no bloquea el motor)
+2026-09-08 20:43:30 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.14% | tendencia=bull 0.17% | macro 9m sideways +0.3%
+2026-09-08 20:43:30 | INFO     | bot.notify.telegram | Telegram verificado (async)
+2026-09-08 20:43:31 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.17% | tendencia=bull 0.23% | macro 9m sideways +0.3%
+2026-09-08 20:43:31 | INFO     | bot.notify.telegram | Telegram mensaje enviado
+2026-09-08 20:43:31 | INFO     | bot.notify.telegram | Telegram: prueba de humo enviada (async)
+2026-09-08 20:43:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$4.32 | +0.22% | invertido $2,000.02 | entry=78453.5950 last=78623.1000
+2026-09-08 20:43:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$4.32 | +0.22% | invertido $2,000.02 | entry=78453.5950 last=78623.1000
+2026-09-08 20:47:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$7.44 | +0.37% | invertido $2,000.02 | entry=78453.5950 last=78745.4200
+2026-09-08 20:50:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$6.43 | +0.32% | invertido $2,000.02 | entry=78453.5950 last=78705.6540
+2026-09-08 20:50:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$6.43 | +0.32% | invertido $2,000.02 | entry=78453.5950 last=78705.6540
+2026-09-08 20:53:30 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.28% | tendencia=bull 0.25% | macro 9m sideways +0.1%
+2026-09-08 20:53:30 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.34% | tendencia=bull 0.37% | macro 9m sideways +0.6%
+2026-09-08 20:53:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$7.41 | +0.37% | invertido $2,000.02 | entry=78453.5950 last=78744.1100
+2026-09-08 20:56:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.24 | +0.41% | invertido $2,000.02 | entry=78453.5950 last=78776.8000
+2026-09-08 20:56:32 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.24 | +0.41% | invertido $2,000.02 | entry=78453.5950 last=78776.8000
+2026-09-08 21:00:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.74 | +0.44% | invertido $2,000.02 | entry=78453.5950 last=78796.5000
+2026-09-08 21:03:30 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.34% | tendencia=bull 0.32% | macro 9m sideways +0.4%
+2026-09-08 21:03:31 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.30% | tendencia=bull 0.35% | macro 9m sideways +0.3%
+2026-09-08 21:03:32 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.05 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.5000
+2026-09-08 21:03:32 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.05 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.5000
+2026-09-08 21:06:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.05 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.5000
+2026-09-08 21:09:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.05 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.5000
+2026-09-08 21:09:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.05 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.5000
+2026-09-08 21:10:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.05 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.5000
+2026-09-08 21:12:31 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.47% | tendencia=bull 0.44% | macro 9m sideways +0.4%
+2026-09-08 21:12:31 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.50% | tendencia=bull 0.41% | macro 9m sideways +0.6%
+2026-09-08 21:13:32 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$9.44 | +0.47% | invertido $2,000.02 | entry=78453.5950 last=78823.8000
+2026-09-08 21:15:32 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$7.82 | +0.39% | invertido $2,000.02 | entry=78453.5950 last=78760.2000
+2026-09-08 21:15:33 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$7.82 | +0.39% | invertido $2,000.02 | entry=78453.5950 last=78760.2000
+2026-09-08 21:16:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$7.82 | +0.39% | invertido $2,000.02 | entry=78453.5950 last=78760.2000
+2026-09-08 21:20:37 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$5.21 | +0.26% | invertido $2,000.02 | entry=78453.5950 last=78657.9400
+2026-09-08 21:21:30 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.31% | tendencia=bull 0.29% | macro 9m sideways +0.3%
+2026-09-08 21:21:30 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.24% | tendencia=bull 0.20% | macro 9m sideways +0.3%
+2026-09-08 21:21:32 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$6.78 | +0.34% | invertido $2,000.02 | entry=78453.5950 last=78719.6300
+2026-09-08 21:21:32 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$6.78 | +0.34% | invertido $2,000.02 | entry=78453.5950 last=78719.6300
+2026-09-08 21:24:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$5.14 | +0.26% | invertido $2,000.02 | entry=78453.5950 last=78655.1000
+2026-09-08 21:28:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$5.14 | +0.26% | invertido $2,000.02 | entry=78453.5950 last=78655.1000
+2026-09-08 21:28:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$5.14 | +0.26% | invertido $2,000.02 | entry=78453.5950 last=78655.1000
+2026-09-08 21:31:31 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.38% | tendencia=bull 0.35% | macro 9m sideways +0.3%
+2026-09-08 21:31:31 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.27% | tendencia=bull 0.27% | macro 9m sideways +0.3%
+2026-09-08 21:31:34 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$5.14 | +0.26% | invertido $2,000.02 | entry=78453.5950 last=78655.1000
+2026-09-08 21:34:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$7.28 | +0.36% | invertido $2,000.02 | entry=78453.5950 last=78739.1000
+2026-09-08 21:34:32 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$7.28 | +0.36% | invertido $2,000.02 | entry=78453.5950 last=78739.1000
+2026-09-08 21:35:31 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.13 | +0.41% | invertido $2,000.02 | entry=78453.5950 last=78772.4260
+2026-09-08 21:38:33 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$9.40 | +0.47% | invertido $2,000.02 | entry=78453.5950 last=78822.2540
+2026-09-08 21:40:32 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.49% | tendencia=bull 0.51% | macro 9m sideways +0.4%
+2026-09-08 21:40:33 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.50% | tendencia=bull 0.49% | macro 9m sideways +0.4%
+2026-09-08 21:40:33 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.41 | +0.52% | invertido $2,000.02 | entry=78453.5950 last=78861.9200
+2026-09-08 21:40:34 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.41 | +0.52% | invertido $2,000.02 | entry=78453.5950 last=78861.9200
+2026-09-08 21:42:33 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.41 | +0.52% | invertido $2,000.02 | entry=78453.5950 last=78861.9200
+2026-09-08 21:46:32 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.66 | +0.53% | invertido $2,000.02 | entry=78453.5950 last=78871.8000
+2026-09-08 21:47:26 | INFO     | bot.engine | Bot detenido — canceladas 0 ordenes pendientes
+2026-09-08 21:47:28 | INFO     | bot.notify.telegram | Telegram mensaje enviado
+2026-09-08 21:47:28 | INFO     | bot.engine | Motor detenido
+2026-09-08 21:47:28 | INFO     | bot | Proceso finalizado
+2026-09-08 21:47:32 | INFO     | bot | === Bot trading Alpaca | hibrido acciones+cripto | dry_run=True ===
+2026-09-08 21:47:32 | INFO     | bot.alpaca.client | Cliente Alpaca inicializado | paper=True | base_url=https://paper-api.alpaca.markets | key=PK***J6IM
+2026-09-08 21:47:32 | INFO     | bot.alpaca.client | Validando conexion con Alpaca (modo hibrido)...
+2026-09-08 21:47:32 | INFO     | bot.alpaca.client | Conexion OK | paper=True | status=AccountStatus.ACTIVE | equity=100004.46 USD | buying_power=391995.24 | cash=97998.81 | mercado_acciones=cerrado
+2026-09-08 21:47:32 | INFO     | bot.alpaca.client | Mercado de acciones cerrado — modo cripto activo si corresponde
+2026-09-08 21:47:32 | INFO     | bot | Estrategia afinada | AAPL SMA15/30, MSFT SMA10/30, BTC/USD SMA9/21, ETH/USD SMA9/21
+2026-09-08 21:47:32 | INFO     | bot | Telegram configurado — verificacion en segundo plano al entrar al loop
+2026-09-08 21:47:32 | INFO     | bot.engine | Motor Tesla 3-6-9 | Modo Cripto Nocturno/Fin de Semana | activos=BTC/USD,ETH/USD | acciones=AAPL,MSFT | cripto=BTC/USD,ETH/USD | tick=60s | capas 3m=180s 6m=360s 9m=540s | dry_run=True | SL=2.00% TP=5.00% | posiciones=1
+2026-09-08 21:47:32 | INFO     | bot.engine | Telegram: arranque async (no bloquea el motor)
+2026-09-08 21:47:33 | INFO     | bot.notify.telegram | Telegram verificado (async)
+2026-09-08 21:47:33 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.53% | tendencia=bull 0.55% | macro 9m sideways +0.4%
+2026-09-08 21:47:33 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.50% | tendencia=bull 0.50% | macro 9m sideways +0.4%
+2026-09-08 21:47:34 | INFO     | bot.notify.telegram | Telegram mensaje enviado
+2026-09-08 21:47:34 | INFO     | bot.notify.telegram | Telegram: prueba de humo enviada (async)
+2026-09-08 21:47:35 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.66 | +0.53% | invertido $2,000.02 | entry=78453.5950 last=78871.8000
+2026-09-08 21:47:35 | INFO     | bot.engine | Bot detenido — canceladas 0 ordenes pendientes
+2026-09-08 21:47:37 | INFO     | bot.notify.telegram | Telegram mensaje enviado
+2026-09-08 21:47:37 | INFO     | bot.engine | Motor detenido
+2026-09-08 21:47:37 | INFO     | bot | Proceso finalizado
+2026-09-08 21:47:41 | INFO     | bot | === Bot trading Alpaca | hibrido acciones+cripto | dry_run=True ===
+2026-09-08 21:47:41 | INFO     | bot.alpaca.client | Cliente Alpaca inicializado | paper=True | base_url=https://paper-api.alpaca.markets | key=PK***J6IM
+2026-09-08 21:47:41 | INFO     | bot.alpaca.client | Validando conexion con Alpaca (modo hibrido)...
+2026-09-08 21:47:42 | INFO     | bot.alpaca.client | Conexion OK | paper=True | status=AccountStatus.ACTIVE | equity=100004.46 USD | buying_power=391995.24 | cash=97998.81 | mercado_acciones=cerrado
+2026-09-08 21:47:42 | INFO     | bot.alpaca.client | Mercado de acciones cerrado — modo cripto activo si corresponde
+2026-09-08 21:47:42 | INFO     | bot | Estrategia afinada | AAPL SMA15/30, MSFT SMA10/30, BTC/USD SMA9/21, ETH/USD SMA9/21
+2026-09-08 21:47:42 | INFO     | bot | Telegram configurado — verificacion en segundo plano al entrar al loop
+2026-09-08 21:47:42 | INFO     | bot.engine | Motor Tesla 3-6-9 | Modo Cripto Nocturno/Fin de Semana | activos=BTC/USD,ETH/USD | acciones=AAPL,MSFT | cripto=BTC/USD,ETH/USD | tick=60s | capas 3m=180s 6m=360s 9m=540s | dry_run=True | SL=2.00% TP=5.00% | posiciones=1
+2026-09-08 21:47:42 | INFO     | bot.engine | Telegram: arranque async (no bloquea el motor)
+2026-09-08 21:47:42 | INFO     | bot.notify.telegram | Telegram verificado (async)
+2026-09-08 21:47:42 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.53% | tendencia=bull 0.55% | macro 9m sideways +0.4%
+2026-09-08 21:47:43 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.50% | tendencia=bull 0.50% | macro 9m sideways +0.4%
+2026-09-08 21:47:43 | INFO     | bot.notify.telegram | Telegram mensaje enviado
+2026-09-08 21:47:43 | INFO     | bot.notify.telegram | Telegram: prueba de humo enviada (async)
+2026-09-08 21:47:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.66 | +0.53% | invertido $2,000.02 | entry=78453.5950 last=78871.8000
+2026-09-08 21:47:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.66 | +0.53% | invertido $2,000.02 | entry=78453.5950 last=78871.8000
+2026-09-08 21:51:56 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.66 | +0.53% | invertido $2,000.02 | entry=78453.5950 last=78871.6020
+2026-09-08 21:54:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$11.16 | +0.56% | invertido $2,000.02 | entry=78453.5950 last=78891.2000
+2026-09-08 21:54:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$11.16 | +0.56% | invertido $2,000.02 | entry=78453.5950 last=78891.2000
+2026-09-08 21:57:43 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.35% | tendencia=bull 0.55% | macro 9m sideways +0.5%
+2026-09-08 21:57:43 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.24% | tendencia=bull 0.52% | macro 9m sideways +0.4%
+2026-09-08 21:58:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$11.21 | +0.56% | invertido $2,000.02 | entry=78453.5950 last=78893.2950
+2026-09-08 22:01:45 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$11.58 | +0.58% | invertido $2,000.02 | entry=78453.5950 last=78907.9800
+2026-09-08 22:01:46 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$11.58 | +0.58% | invertido $2,000.02 | entry=78453.5950 last=78907.9800
+2026-09-08 22:02:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$11.58 | +0.58% | invertido $2,000.02 | entry=78453.5950 last=78907.9800
+2026-09-08 22:06:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.67 | +0.53% | invertido $2,000.02 | entry=78453.5950 last=78872.0000
+2026-09-08 22:07:42 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.36% | tendencia=bull 0.27% | macro 9m sideways +0.6%
+2026-09-08 22:07:42 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.15% | tendencia=bull 0.21% | macro 9m sideways +0.4%
+2026-09-08 22:08:42 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$11.55 | +0.58% | invertido $2,000.02 | entry=78453.5950 last=78906.7000
+2026-09-08 22:08:42 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$11.55 | +0.58% | invertido $2,000.02 | entry=78453.5950 last=78906.7000
+2026-09-08 22:10:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$11.55 | +0.58% | invertido $2,000.02 | entry=78453.5950 last=78906.7000
+2026-09-08 22:13:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.51 | +0.53% | invertido $2,000.02 | entry=78453.5950 last=78865.9230
+2026-09-08 22:14:42 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.51 | +0.53% | invertido $2,000.02 | entry=78453.5950 last=78865.9230
+2026-09-08 22:14:42 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$10.51 | +0.53% | invertido $2,000.02 | entry=78453.5950 last=78865.9230
+2026-09-08 22:16:43 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.22% | tendencia=bull 0.18% | macro 9m sideways +0.4%
+2026-09-08 22:16:43 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.15% | tendencia=bull 0.07% | macro 9m sideways +0.4%
+2026-09-08 22:16:45 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.11 | +0.41% | invertido $2,000.02 | entry=78453.5950 last=78771.6000
+2026-09-08 22:19:57 | INFO     | bot.alpaca.client | Reloj de acciones no disponible (ConnectionError) — se asume mercado cerrado / modo cripto
+2026-09-08 22:20:00 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$6.08 | +0.30% | invertido $2,000.02 | entry=78453.5950 last=78692.0600
+2026-09-08 22:20:42 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$6.08 | +0.30% | invertido $2,000.02 | entry=78453.5950 last=78692.0600
+2026-09-08 22:20:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$6.08 | +0.30% | invertido $2,000.02 | entry=78453.5950 last=78692.0600
+2026-09-08 22:23:46 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$6.51 | +0.33% | invertido $2,000.02 | entry=78453.5950 last=78708.9400
+2026-09-08 22:26:43 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.10% | tendencia=bull 0.24% | macro 9m sideways +0.4%
+2026-09-08 22:26:43 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.07% | tendencia=bull 0.22% | macro 9m sideways +0.4%
+2026-09-08 22:26:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$9.25 | +0.46% | invertido $2,000.02 | entry=78453.5950 last=78816.2530
+2026-09-08 22:26:45 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$9.25 | +0.46% | invertido $2,000.02 | entry=78453.5950 last=78816.2530
+2026-09-08 22:30:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.06 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.9200
+2026-09-08 22:32:46 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.06 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.9200
+2026-09-08 22:32:46 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.06 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.9200
+2026-09-08 22:33:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.06 | +0.40% | invertido $2,000.02 | entry=78453.5950 last=78769.9200
+2026-09-08 22:36:44 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.00% | tendencia=bull 0.10% | macro 9m sideways +0.4%
+2026-09-08 22:36:44 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways -0.02% | tendencia=bear 0.12% | macro 9m sideways +0.5%
+2026-09-08 22:36:47 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.37 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78781.8420
+2026-09-08 22:39:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.37 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78781.8420
+2026-09-08 22:39:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.37 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78781.8420
+2026-09-08 22:40:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.37 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78781.8420
+2026-09-08 22:43:45 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.37 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78781.8420
+2026-09-08 22:46:42 | INFO     | bot.scheduler.multi_tf | BTC/USD | capa 9m | estructura=sideways 0.02% | tendencia=bear 0.01% | macro 9m sideways +0.4%
+2026-09-08 22:46:43 | INFO     | bot.scheduler.multi_tf | ETH/USD | capa 9m | estructura=sideways 0.03% | tendencia=bear -0.02% | macro 9m sideways +0.5%
+2026-09-08 22:46:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.37 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78781.8420
+2026-09-08 22:46:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.37 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78781.8420
+2026-09-08 22:47:42 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.19 | +0.41% | invertido $2,000.02 | entry=78453.5950 last=78774.7500
+2026-09-08 22:50:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.46 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78785.6170
+2026-09-08 22:52:43 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.46 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78785.6170
+2026-09-08 22:52:44 | INFO     | bot.reporting.pnl | P&L [VERDE] BTC/USD | ACTUALIZADA | long qty=0.025493 | neto +$8.46 | +0.42% | invertido $2,000.02 | entry=78453.5950 last=78785.6170
+
+================================================================
+2) TIMEFRAMES Y SMA TAL COMO ESTAN EN EL CODIGO / CONFIG
+================================================================
+bot/scheduler/multi_tf.py
+  _layer_3m linea 202: get_bars(symbol, 1Min, 30)
+  _layer_9m linea 226: get_bars(symbol, 9Min, 80)
+  _process_6m_symbol linea 292: get_bars(symbol, 6Min, engine.settings.lookback_bars)
+  analyze_trend 9m bot/strategy/multi_tf_analysis.py lineas 100-113: SMA 5/13 sobre velas 9Min
+bot/engine.py _mark_to_market lineas 143-145: get_bars(symbol, settings.bar_timeframe, settings.lookback_bars)
+bot/config.py
+  SMA_FAST default 20 / SMA_SLOW default 50 (lineas 150-151)
+  CRYPTO_SMA_FAST default 9 / CRYPTO_SMA_SLOW default 21 (lineas 152-157)
+  BAR_TIMEFRAME default 1Day (linea 158)
+  LOOKBACK_BARS default 120 (lineas 159-161)
+  TF_3M_SECONDS=180 TF_6M_SECONDS=360 TF_9M_SECONDS=540 (lineas 135-137)
+main.py _live_strategy lineas 112-134:
+  walk-forward AAPL/MSFT desde data/strategy_params.json
+  crypto_symbols reciben (crypto_sma_fast, crypto_sma_slow) si no estan en walk-forward
+  TunedSmaStrategy(settings.sma_fast, settings.sma_slow, by_symbol)
+Log arranque 2026-09-08 21:47:42 | Estrategia afinada | AAPL SMA15/30, MSFT SMA10/30, BTC/USD SMA9/21, ETH/USD SMA9/21
+Runtime load_settings (sin secretos): dry_run=True sma_stock=20/50 sma_crypto=9/21 BAR_TIMEFRAME=1Day LOOKBACK_BARS=120
+data/strategy_params.json:
+{
+  "generated_at": "2026-09-02 00:13:46 UTC",
+  "symbols": {
+    "AAPL": {
+      "sma_fast": 15,
+      "sma_slow": 30,
+      "stop_loss_pct": 0.015,
+      "take_profit_pct": 0.06,
+      "atr_stop_mult": 1.5,
+      "source": "optimized",
+      "train_score": 3.0599,
+      "train_return_pct": 1.9251,
+      "train_sharpe": 1.7737,
+      "train_trades": 6,
+      "validate_return_pct": -0.0377,
+      "validate_sharpe": -0.0322,
+      "validate_trades": 7,
+      "train_start": "2020-09-02 04:00:00+00:00",
+      "train_end": "2023-08-31 04:00:00+00:00",
+      "validate_start": "2023-09-01 04:00:00+00:00",
+      "validate_end": "2026-09-01 04:00:00+00:00"
+    },
+    "MSFT": {
+      "sma_fast": 10,
+      "sma_slow": 30,
+      "stop_loss_pct": 0.015,
+      "take_profit_pct": 0.06,
+      "atr_stop_mult": 1.5,
+      "source": "optimized",
+      "train_score": 1.7716,
+      "train_return_pct": 1.3082,
+      "train_sharpe": 0.9989,
+      "train_trades": 11,
+      "validate_return_pct": 0.0549,
+      "validate_sharpe": 0.0673,
+      "validate_trades": 9,
+      "train_start": "2020-09-02 04:00:00+00:00",
+      "train_end": "2023-08-31 04:00:00+00:00",
+      "validate_start": "2023-09-01 04:00:00+00:00",
+      "validate_end": "2026-09-01 04:00:00+00:00"
+    }
+  }
+}
+
+================================================================
+3) OPERACIONES EJECUTADAS HOY (created_at 2026-09-08 o 2026-09-09 UTC)
+================================================================
+{"id": 10, "created_at": "2026-09-08 23:28:21 UTC", "symbol": "BTC/USD", "side": "buy", "qty": 0.025493, "price": 78453.595, "pnl_abs": null, "pnl_pct": null, "reason": "signal_6m", "dry_run": 0, "paper": 1, "order_id": "9fe4446b-cde2-4547-afbe-039cff41b2c6"}
+created_at_utc=2026-09-08 23:28:21 UTC
+created_at_et=2026-09-08 19:28:21 America/New_York
+symbol=BTC/USD
+side=buy
+qty=0.025493
+price=78453.595
+reason=signal_6m
+dry_run=false (0=paper real, 1=dry-run)
+paper=1
+order_id=9fe4446b-cde2-4547-afbe-039cff41b2c6
+pnl_abs=None
+pnl_pct=None
+
+================================================================
+4) POSICIONES ABIERTAS (dashboard = web/status.py + archivos data/)
+================================================================
+data/control.json:
+{
+  "paused": false
+}
+data/bot.pid: 15380
+
+data/open_positions.json:
+{
+  "updated_at": "2026-09-09 02:52:44 UTC",
+  "positions": {
+    "BTC/USD": {
+      "symbol": "BTC/USD",
+      "qty": 0.025493,
+      "avg_entry_price": 78453.595,
+      "stop_price": 76884.5231,
+      "take_profit_price": 82376.27475000001,
+      "stop_pct": 0.02,
+      "take_profit_pct": 0.05,
+      "dry_run": false,
+      "asset_class": "crypto",
+      "opened_at": "2026-09-08 23:28:21 UTC",
+      "current_price": 78785.617
+    }
+  }
+}
+
+data/scheduler_state.json (incluye signal 6m hold/buy/sell):
+{
+  "updated_at": "2026-09-09 02:52:44 UTC",
+  "schedule": "tesla-3-6-9",
+  "trading_mode": "crypto",
+  "trading_mode_label": "Modo Cripto Nocturno/Fin de Semana",
+  "active_symbols": [
+    "BTC/USD",
+    "ETH/USD"
+  ],
+  "tick_seconds": 60,
+  "telegram_enabled": true,
+  "layers": {
+    "3m": {
+      "interval_seconds": 180,
+      "next_in_seconds": 57
+    },
+    "6m": {
+      "interval_seconds": 360,
+      "next_in_seconds": 358
+    },
+    "9m": {
+      "interval_seconds": 540,
+      "next_in_seconds": 177
+    }
+  },
+  "symbols": {
+    "AAPL": {
+      "spike": false,
+      "spike_move_pct": 0.0,
+      "spike_reason": "",
+      "signal": "hold",
+      "signal_detail": "",
+      "structure": "sideways",
+      "structure_return_pct": 0.0,
+      "trend": "sideways",
+      "trend_return_pct": 0.0,
+      "macro": "sideways",
+      "macro_return_pct": 0.0,
+      "macro_blocks_buy": false,
+      "macro_blocks_sell": false
+    },
+    "MSFT": {
+      "spike": false,
+      "spike_move_pct": 0.0,
+      "spike_reason": "",
+      "signal": "hold",
+      "signal_detail": "",
+      "structure": "sideways",
+      "structure_return_pct": 0.0,
+      "trend": "sideways",
+      "trend_return_pct": 0.0,
+      "macro": "sideways",
+      "macro_return_pct": 0.0,
+      "macro_blocks_buy": false,
+      "macro_blocks_sell": false
+    },
+    "BTC/USD": {
+      "spike": false,
+      "spike_move_pct": 0.014080694234594487,
+      "spike_reason": "rango normal",
+      "signal": "hold",
+      "signal_detail": "sin cruce SMA",
+      "structure": "sideways",
+      "structure_return_pct": 0.02,
+      "trend": "bear",
+      "trend_return_pct": 0.01,
+      "macro": "sideways",
+      "macro_return_pct": 0.42,
+      "macro_blocks_buy": false,
+      "macro_blocks_sell": false
+    },
+    "ETH/USD": {
+      "spike": false,
+      "spike_move_pct": -0.05672315556139463,
+      "spike_reason": "rango normal",
+      "signal": "hold",
+      "signal_detail": "sin cruce SMA",
+      "structure": "sideways",
+      "structure_return_pct": 0.03,
+      "trend": "bear",
+      "trend_return_pct": -0.02,
+      "macro": "sideways",
+      "macro_return_pct": 0.46,
+      "macro_blocks_buy": false,
+      "macro_blocks_sell": false
+    }
+  }
+}
+
+Snapshot web/status.py (JSON crudo, sin secretos):
+﻿{"paper": true, "mode": "hybrid", "dry_run": true, "status": "AccountStatus.ACTIVE", "currency": "USD", "equity": 100002.27, "cash": 97998.81, "buying_power": 391995.24, "market_open": false, "stock_feed_ok": true, "next_open": "2026-09-09 09:30:00-04:00", "next_close": "2026-09-09 16:00:00-04:00", "symbols": ["AAPL", "MSFT"], "stock_symbols": ["AAPL", "MSFT"], "crypto_symbols": ["BTC/USD", "ETH/USD"], "all_symbols": ["AAPL", "MSFT", "BTC/USD", "ETH/USD"], "trading_mode": "crypto", "trading_mode_label": "Modo Cripto Nocturno/Fin de Semana", "active_symbols": ["BTC/USD", "ETH/USD"], "stop_loss_pct": 0.02, "take_profit_pct": 0.05, "positions": [{"symbol": "BTC/USD", "qty": 0.025493, "side": "long", "entry": 78453.595, "last": 78785.617, "invested": 2000.02, "pnl_abs": 8.46, "pnl_pct": 0.42, "in_profit": true, "color": "VERDE", "stop_price": 76884.5231, "take_profit_price": 82376.2748, "stop_pct": 2.0, "take_profit_pct": 5.0}], "trades": [{"id": 10, "created_at": "2026-09-08 23:28:21 UTC", "symbol": "BTC/USD", "side": "buy", "qty": 0.025493, "price": 78453.595, "pnl_abs": null, "pnl_pct": null, "reason": "signal_6m", "dry_run": false}, {"id": 9, "created_at": "2026-09-02 20:00:03 UTC", "symbol": "MSFT", "side": "sell", "qty": 4.0, "price": 496.74, "pnl_abs": 0.76, "pnl_pct": 0.04, "reason": "mode_switch", "dry_run": true}, {"id": 8, "created_at": "2026-09-02 19:41:06 UTC", "symbol": "AAPL", "side": "sell", "qty": 6.0, "price": 325.28, "pnl_abs": -0.3, "pnl_pct": -0.02, "reason": "signal_6m", "dry_run": true}, {"id": 7, "created_at": "2026-09-02 17:39:07 UTC", "symbol": "MSFT", "side": "buy", "qty": 4.0, "price": 496.55, "pnl_abs": null, "pnl_pct": null, "reason": "signal_6m", "dry_run": true}, {"id": 6, "created_at": "2026-09-02 16:03:27 UTC", "symbol": "AAPL", "side": "buy", "qty": 6.0, "price": 325.33, "pnl_abs": null, "pnl_pct": null, "reason": "signal_6m", "dry_run": true}, {"id": 5, "created_at": "2026-09-02 13:23:27 UTC", "symbol": "ETH/USD", "side": "buy", "qty": 0.839913, "price": 2381.2, "pnl_abs": null, "pnl_pct": null, "reason": "signal_6m", "dry_run": true}, {"id": 4, "created_at": "2026-09-02 04:02:11 UTC", "symbol": "ETH/USD", "side": "buy", "qty": 0.829291, "price": 2411.7, "pnl_abs": null, "pnl_pct": null, "reason": "signal_6m", "dry_run": true}, {"id": 3, "created_at": "2026-09-02 03:43:10 UTC", "symbol": "BTC/USD", "side": "buy", "qty": 0.025789, "price": 77553.337, "pnl_abs": null, "pnl_pct": null, "reason": "signal_6m", "dry_run": true}, {"id": 2, "created_at": "2026-09-01 23:20:52 UTC", "symbol": "AAPL", "side": "sell", "qty": 2.0, "price": 195.0, "pnl_abs": 9.0, "pnl_pct": 2.36, "reason": "test", "dry_run": true}, {"id": 1, "created_at": "2026-09-01 23:20:52 UTC", "symbol": "AAPL", "side": "buy", "qty": 2.0, "price": 190.5, "pnl_abs": null, "pnl_pct": null, "reason": "test", "dry_run": true}], "realized_pnl": 9.46, "trade_count": 10, "bot": {"paused": false, "running": true, "active": true, "pid": 15380}, "telegram_enabled": true, "telegram_verified": true, "scheduler_tick_seconds": 60, "poll_interval_seconds": 60, "scheduler": {"updated_at": "2026-09-09 02:52:44 UTC", "schedule": "tesla-3-6-9", "trading_mode": "crypto", "trading_mode_label": "Modo Cripto Nocturno/Fin de Semana", "active_symbols": ["BTC/USD", "ETH/USD"], "tick_seconds": 60, "telegram_enabled": true, "layers": {"3m": {"interval_seconds": 180, "next_in_seconds": 57}, "6m": {"interval_seconds": 360, "next_in_seconds": 358}, "9m": {"interval_seconds": 540, "next_in_seconds": 177}}, "symbols": {"AAPL": {"spike": false, "spike_move_pct": 0.0, "spike_reason": "", "signal": "hold", "signal_detail": "", "structure": "sideways", "structure_return_pct": 0.0, "trend": "sideways", "trend_return_pct": 0.0, "macro": "sideways", "macro_return_pct": 0.0, "macro_blocks_buy": false, "macro_blocks_sell": false}, "MSFT": {"spike": false, "spike_move_pct": 0.0, "spike_reason": "", "signal": "hold", "signal_detail": "", "structure": "sideways", "structure_return_pct": 0.0, "trend": "sideways", "trend_return_pct": 0.0, "macro": "sideways", "macro_return_pct": 0.0, "macro_blocks_buy": false, "macro_blocks_sell": false}, "BTC/USD": {"spike": false, "spike_move_pct": 0.014080694234594487, "spike_reason": "rango normal", "signal": "hold", "signal_detail": "sin cruce SMA", "structure": "sideways", "structure_return_pct": 0.02, "trend": "bear", "trend_return_pct": 0.01, "macro": "sideways", "macro_return_pct": 0.42, "macro_blocks_buy": false, "macro_blocks_sell": false}, "ETH/USD": {"spike": false, "spike_move_pct": -0.05672315556139463, "spike_reason": "rango normal", "signal": "hold", "signal_detail": "sin cruce SMA", "structure": "sideways", "structure_return_pct": 0.03, "trend": "bear", "trend_return_pct": -0.02, "macro": "sideways", "macro_return_pct": 0.46, "macro_blocks_buy": false, "macro_blocks_sell": false}}}, "strategy": {"generated_at": "2026-09-02 00:13:46 UTC", "symbols": {"AAPL": {"sma_fast": 15, "sma_slow": 30, "stop_loss_pct": 0.015, "take_profit_pct": 0.06, "asset_class": "stock", "source": "optimized", "train_return_pct": 1.9251, "train_sharpe": 1.7737, "validate_return_pct": -0.0377, "validate_sharpe": -0.0322, "validate_trades": 7, "train_start": "2020-09-02 04:00:00+00:00", "validate_start": "2023-09-01 04:00:00+00:00"}, "MSFT": {"sma_fast": 10, "sma_slow": 30, "stop_loss_pct": 0.015, "take_profit_pct": 0.06, "asset_class": "stock", "source": "optimized", "train_return_pct": 1.3082, "train_sharpe": 0.9989, "validate_return_pct": 0.0549, "validate_sharpe": 0.0673, "validate_trades": 9, "train_start": "2020-09-02 04:00:00+00:00", "validate_start": "2023-09-01 04:00:00+00:00"}}}}
+
+================================================================
+5) PROCESO / CRASH / REINICIOS
+================================================================
+pm2 status 2026-09-08 ~22:51 ET:
+  trading-bot id=1 pid_wrapper=12764 pid_child=15380 uptime=64m restarts=3 status=online
+  trading-web id=0 pid=5984 uptime=5h restarts=0 status=online
+  logs/pm2-bot-error.log: vacio
+  control: paused=false running=true active=true pid=15380
+Arranques en las ultimas 4 horas:
+  2026-09-08 20:43:29 | === Bot trading Alpaca | dry_run=True ===
+  2026-09-08 21:47:26 | Bot detenido — canceladas 0 ordenes pendientes
+  2026-09-08 21:47:28 | Motor detenido / Proceso finalizado
+  2026-09-08 21:47:32 | === Bot trading Alpaca | dry_run=True ===
+  2026-09-08 21:47:35 | Bot detenido — canceladas 0 ordenes pendientes
+  2026-09-08 21:47:37 | Motor detenido / Proceso finalizado
+  2026-09-08 21:47:41 | === Bot trading Alpaca | dry_run=True === (proceso actual, uptime 64m)
+No hay Traceback / ERROR / FATAL / Exception en bot.log en las ultimas 4 horas.
+Unica linea ConnectionError (nivel INFO, el proceso no cayo):
+  2026-09-08 22:19:57 | Reloj de acciones no disponible (ConnectionError) — se asume mercado cerrado / modo cripto
+FIN REPORTE

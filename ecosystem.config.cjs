@@ -11,17 +11,18 @@
  *   pm2-startup install
  *   pm2 save
  *
- * Importante: desactiva suspensión/hibernación de Windows o el SO
- * pausará estos procesos aunque PM2 esté bien configurado.
+ * Si existe data/LOCAL_DISABLED, PM2 no arranca nada en esta máquina.
  */
+const fs = require('fs');
 const path = require('path');
 
 const ROOT = __dirname;
 const PYTHON = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
 const LOG_DIR = path.join(ROOT, 'logs');
+const LOCAL_DISABLED = fs.existsSync(path.join(ROOT, 'data', 'LOCAL_DISABLED'));
 
 module.exports = {
-  apps: [
+  apps: LOCAL_DISABLED ? [] : [
     {
       name: 'trading-web',
       cwd: path.join(ROOT, 'web'),
@@ -37,6 +38,8 @@ module.exports = {
       exp_backoff_restart_delay: 1000,
       env: {
         NODE_ENV: 'production',
+        HOST: '0.0.0.0',
+        PORT: '3000',
       },
       error_file: path.join(LOG_DIR, 'pm2-web-error.log'),
       out_file: path.join(LOG_DIR, 'pm2-web-out.log'),

@@ -44,6 +44,7 @@ def detect_spike(
     last_price: float,
     threshold_pct: float = 0.005,
     lookback_bars: int = 3,
+    window_label: str | None = None,
 ) -> SpikeSnapshot:
     """Detecta movimiento brusco en ventana de ~3 minutos (velas 1m)."""
     if bars_1m.empty or len(bars_1m) < lookback_bars + 1 or last_price <= 0:
@@ -52,12 +53,13 @@ def detect_spike(
     if ref <= 0:
         return SpikeSnapshot(False, 0.0, "referencia invalida")
     move = (last_price - ref) / ref
+    window = window_label or f"{lookback_bars} velas"
     if abs(move) >= threshold_pct:
         direction = "alcista" if move > 0 else "bajista"
         return SpikeSnapshot(
             True,
             move * 100.0,
-            f"movimiento {direction} {move:+.2%} en {lookback_bars}m",
+            f"movimiento {direction} {move:+.2%} en {window}",
         )
     return SpikeSnapshot(False, move * 100.0, "rango normal")
 
@@ -120,6 +122,7 @@ def analyze_macro(
     bars: pd.DataFrame,
     strong_threshold_pct: float = 2.5,
     lookback: int = 20,
+    timeframe_label: str = "9Min",
 ) -> MacroSnapshot:
     if bars.empty or len(bars) < lookback:
         return MacroSnapshot("sideways", 0.0, False, False, "macro sin datos")
@@ -134,7 +137,7 @@ def analyze_macro(
     strong = abs(ret_pct) >= strong_threshold_pct
     blocks_buy = regime == "bear" and strong
     blocks_sell = regime == "bull" and strong
-    reason = f"macro 9m {regime} {ret_pct:+.1f}%"
+    reason = f"macro {timeframe_label} {regime} {ret_pct:+.1f}%"
     if blocks_buy:
         reason += " | bloquea compras"
     if blocks_sell:

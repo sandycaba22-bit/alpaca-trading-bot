@@ -84,7 +84,7 @@ def select_regime(symbol: str, bars: pd.DataFrame, settings: Settings) -> Regime
         enabled = (StrategyId.BREAKOUT,)
         reason = "ADX no disponible — solo ruptura (fallback)"
 
-    logger.info(
+    logger.debug(
         "%s | regimen=%s | %s | habilitadas=%s",
         symbol,
         regime.value,

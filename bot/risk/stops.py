@@ -45,6 +45,11 @@ class StopTakeProfitPolicy:
         atr_sl_mult: float | None = None,
         atr_tp_mult: float = 3.0,
         atr_trailing_mult: float = 2.0,
+        breakeven_activate_pct: float = 0.0015,
+        breakeven_activate_atr_mult: float = 0.5,
+        breakeven_buffer: float = 0.25,
+        breakeven_buffer_atr_mult: float = 0.1,
+        use_breakeven_lock: bool = True,
     ) -> None:
         if stop_loss_pct <= 0 or take_profit_pct <= 0:
             raise ValueError("STOP_LOSS_PCT y TAKE_PROFIT_PCT deben ser > 0")
@@ -56,6 +61,11 @@ class StopTakeProfitPolicy:
         self.atr_trailing_mult = atr_trailing_mult
         self.max_stop_pct = max_stop_pct
         self.max_tp_pct = max_tp_pct
+        self.breakeven_activate_pct = breakeven_activate_pct
+        self.breakeven_activate_atr_mult = breakeven_activate_atr_mult
+        self.breakeven_buffer = breakeven_buffer
+        self.breakeven_buffer_atr_mult = breakeven_buffer_atr_mult
+        self.use_breakeven_lock = use_breakeven_lock
 
     def levels(
         self,
@@ -110,39 +120,71 @@ class StopTakeProfitPolicy:
         activate_pct: float = 0.025,
         offset_pct: float = 0.0125,
     ) -> tuple[float | None, str]:
-        """Nuevo SL de trailing, o None si aún no aplica / no sube."""
+        """Nuevo SL de trailing (piso A breakeven + piso B chase ATR), o None si no sube."""
         if qty <= 0 or entry_price <= 0 or peak_price <= 0:
             return None, "invalid"
         long = qty >= 0
-        source = "pct"
+        floor_a: float | None = None
+        floor_b: float | None = None
+        source_b = "pct"
+
+        if (
+            self.use_breakeven_lock
+            and atr_value
+            and atr_value > 0
+            and self.breakeven_activate_atr_mult > 0
+        ):
+            activate_dist = float(atr_value) * float(self.breakeven_activate_atr_mult)
+            buffer = max(0.0, float(atr_value) * float(self.breakeven_buffer_atr_mult))
+            if long and peak_price >= entry_price + activate_dist:
+                floor_a = entry_price + buffer
+            elif (not long) and peak_price <= entry_price - activate_dist:
+                floor_a = entry_price - buffer
+
         if atr_value and atr_value > 0:
             offset = atr_value * self.atr_trailing_mult
             if offset <= 0:
-                return None, "atr_zero"
-            if long:
-                if peak_price < entry_price + offset:
-                    return None, "atr_wait"
-                candidate = max(entry_price, peak_price - offset)
-            else:
-                if peak_price > entry_price - offset:
-                    return None, "atr_wait"
-                candidate = min(entry_price, peak_price + offset)
-            source = "atr"
+                if floor_a is None:
+                    return None, "atr_zero"
+            elif long and peak_price >= entry_price + offset:
+                floor_b = peak_price - offset
+                source_b = "atr"
+            elif (not long) and peak_price <= entry_price - offset:
+                floor_b = peak_price + offset
+                source_b = "atr"
         else:
             pnl_pct = peak_price / entry_price - 1.0
-            if long:
-                if pnl_pct < activate_pct:
-                    return None, "pct_wait"
-                candidate = max(entry_price, peak_price * (1.0 - offset_pct))
-            else:
-                if pnl_pct > -activate_pct:
-                    return None, "pct_wait"
-                candidate = min(entry_price, peak_price * (1.0 + offset_pct))
-        if long and candidate <= current_sl:
-            return None, source
-        if (not long) and current_sl > 0 and candidate >= current_sl:
-            return None, source
-        return candidate, source
+            if long and pnl_pct >= activate_pct:
+                floor_b = peak_price * (1.0 - offset_pct)
+                source_b = "pct"
+            elif (not long) and pnl_pct <= -activate_pct:
+                floor_b = peak_price * (1.0 + offset_pct)
+                source_b = "pct"
+
+        floors = [value for value in (floor_a, floor_b) if value is not None]
+        if not floors:
+            return None, "wait"
+
+        if long:
+            candidate = max(floors)
+            if current_sl > 0:
+                candidate = max(current_sl, candidate)
+            if candidate <= current_sl:
+                return None, source_b if floor_b is not None else "breakeven"
+        else:
+            candidate = min(floors)
+            if current_sl > 0:
+                candidate = min(current_sl, candidate)
+            if current_sl > 0 and candidate >= current_sl:
+                return None, source_b if floor_b is not None else "breakeven"
+
+        if floor_b is not None and (
+            floor_a is None
+            or (long and floor_b >= floor_a)
+            or ((not long) and floor_b <= floor_a)
+        ):
+            return candidate, source_b
+        return candidate, "breakeven"
 
     def evaluate_price(
         self,

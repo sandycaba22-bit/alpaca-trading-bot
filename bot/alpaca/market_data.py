@@ -44,6 +44,7 @@ _TIMEFRAMES: dict[str, TimeFrame] = {
     "6Min": TimeFrame(6, TimeFrameUnit.Minute),
     "9Min": TimeFrame(9, TimeFrameUnit.Minute),
     "15Min": TimeFrame(15, TimeFrameUnit.Minute),
+    "30Min": TimeFrame(30, TimeFrameUnit.Minute),
     "1Hour": TimeFrame.Hour,
     "1Day": TimeFrame.Day,
 }

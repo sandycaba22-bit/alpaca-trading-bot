@@ -77,9 +77,9 @@ class PendingExecution:
     event_id: str = ""
 
 
-def _trailing_bar_timeframe(symbol: str) -> str:
-    """Velas Alpaca para el high del trailing: 6m cripto / 1m acciones."""
-    return "6Min" if is_crypto_symbol(symbol) else "1Min"
+def _trailing_bar_timeframe(settings: Settings, symbol: str) -> str:
+    """Velas Alpaca para el high del trailing: 15m/30m cripto, 1m acciones."""
+    return settings.crypto_bar_timeframe if is_crypto_symbol(symbol) else "1Min"
 
 
 def _current_bar_high(bars: pd.DataFrame, last_price: float) -> float:
@@ -207,7 +207,7 @@ class TradingEngine:
         logger.info(
             "Senal | disparador=ruptura+volumen lookback=%s vol>=%.2fx rango>=%.2fxATR | "
             "sesgo=SMA lenta | ADX%s periodo=%s umbral=%.1f | cooldown=%s velas | "
-            "confirmacion entrada=%s tf=%s",
+            "confirmacion entrada=%s tf_stock=%s tf_crypto=%s/%s",
             self.settings.breakout_lookback_periods,
             self.settings.breakout_volume_mult,
             self.settings.breakout_min_range_atr_mult,
@@ -217,6 +217,8 @@ class TradingEngine:
             self.settings.breakout_cooldown_bars,
             "on" if self.settings.entry_confirmation_enabled else "off",
             self.settings.confirm_higher_tf,
+            self.settings.crypto_bar_timeframe,
+            self.settings.crypto_regime_timeframe,
         )
         logger.info(
             "Filtros extra | ADX overrides=%s | ATR periodo=%s SL=%.2fx TP=%.2fx trail=%.2fx | "
@@ -1252,7 +1254,9 @@ class TradingEngine:
         entry = float(position.avg_entry_price)
         md_symbol = normalize_symbol(symbol)
         bars = self.market_data.get_bars(
-            md_symbol, self.settings.bar_timeframe, self.settings.lookback_bars
+            md_symbol,
+            self.settings.crypto_bar_timeframe if is_crypto_symbol(symbol) else self.settings.bar_timeframe,
+            self.settings.lookback_bars,
         )
         fallback = float(bars["close"].iloc[-1]) if not bars.empty else entry
         tape = self.market_data.get_live_tape(md_symbol, fallback_price=fallback)
@@ -1261,7 +1265,7 @@ class TradingEngine:
         atr_value = last_atr(bars, self.settings.atr_period) if not bars.empty else None
         atr_value = self._remember_atr(symbol, atr_value)
 
-        trail_tf = _trailing_bar_timeframe(symbol)
+        trail_tf = _trailing_bar_timeframe(self.settings, symbol)
         try:
             trail_bars = self.market_data.get_bars(md_symbol, trail_tf, 8)
         except Exception:
@@ -1489,7 +1493,11 @@ class TradingEngine:
                 continue
             entry = float(pos.avg_entry_price)
             md_symbol = normalize_symbol(symbol)
-            bars = self.market_data.get_bars(md_symbol, "6Min" if is_crypto_symbol(symbol) else "15Min", 30)
+            bars = self.market_data.get_bars(
+                md_symbol,
+                self.settings.crypto_bar_timeframe if is_crypto_symbol(symbol) else "15Min",
+                30,
+            )
             fallback = float(bars["close"].iloc[-1]) if not bars.empty else entry
             tape = self.market_data.get_live_tape(md_symbol, fallback_price=fallback)
             last_price = tape.last_price if tape else fallback

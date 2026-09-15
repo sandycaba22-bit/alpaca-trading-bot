@@ -206,6 +206,25 @@ class TelegramNotifier:
             lines.append("Paper · dry-run (orden no enviada)")
         return self._send_event(event_id, "\n".join(lines))
 
+    def notify_breakeven_locked(
+        self,
+        symbol: str,
+        entry_price: float,
+        current_price: float,
+        stop_price: float,
+        gain_pct: float,
+        event_id: str | None = None,
+    ) -> bool:
+        sign = "+" if gain_pct >= 0 else ""
+        lines = [
+            f"🟢 BREAKEVEN ASEGURADO {symbol}",
+            f"Precio de entrada: ${entry_price:,.4f}",
+            f"High: ${current_price:,.4f} ({sign}{gain_pct:.2f}%)",
+            f"SL piso: ${stop_price:,.4f} (por encima de la entrada)",
+            "El TP fijo sigue vigente. Si el precio se revierte, no cierra en pérdida.",
+        ]
+        return self._send_event(event_id, "\n".join(lines))
+
     def notify_trailing_activated(
         self,
         symbol: str,

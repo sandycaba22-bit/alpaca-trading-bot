@@ -65,6 +65,20 @@ class MultiStrategyOrchestrator(Strategy):
 
     def evaluate(self, ctx: StrategyContext) -> StrategyPick:
         regime = select_regime(ctx.symbol, ctx.bars, self.settings)
+        bb_value = (
+            f"{regime.bb_width:.4f}/{regime.bb_width_avg:.4f}"
+            if regime.bb_width is not None and regime.bb_width_avg is not None
+            else "n/a"
+        )
+        adx_value = f"{regime.adx:.2f}" if regime.adx is not None else "n/a"
+        logger.info(
+            "%s | regimen=%s | razon=%s | ADX=%s | BB=%s",
+            ctx.symbol,
+            regime.regime.value,
+            regime.reason,
+            adx_value,
+            bb_value,
+        )
         enabled = regime.enabled
         if self.force_strategy is not None:
             if self.force_strategy not in enabled:

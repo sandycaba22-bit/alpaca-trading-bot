@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from bot.config import PROJECT_ROOT
-from bot.market.assets import all_symbols
+from bot.market.assets import all_symbols, is_crypto_symbol
 from bot.market.mode import TradingMode, is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.strategy.base import Signal
 from bot.strategy.multi_tf_analysis import (
@@ -33,6 +33,22 @@ logger = logging.getLogger(__name__)
 STATE_PATH = PROJECT_ROOT / "data" / "scheduler_state.json"
 
 LAYER_NAMES = ("3m", "6m", "9m")
+
+_TF_SECONDS = {
+    "1Min": 60,
+    "3Min": 180,
+    "5Min": 300,
+    "6Min": 360,
+    "9Min": 540,
+    "15Min": 900,
+    "30Min": 1800,
+    "1Hour": 3600,
+    "1Day": 86400,
+}
+
+
+def _timeframe_seconds(label: str) -> int:
+    return int(_TF_SECONDS.get(str(label), 900))
 
 
 @dataclass
@@ -163,6 +179,7 @@ class MultiTimeframeEngine:
     def bootstrap(self) -> None:
         clock = self.engine.client.get_market_clock()
         self._apply_trading_mode(clock)
+        self._sync_intervals_for_mode()
         now = time.monotonic()
         for layer in LAYER_NAMES:
             self.scheduler.last_run[layer] = now - self.scheduler.intervals[layer]
@@ -178,6 +195,7 @@ class MultiTimeframeEngine:
 
         clock = engine.client.get_market_clock()
         self._apply_trading_mode(clock)
+        self._sync_intervals_for_mode()
 
         now = time.monotonic()
         run_3m = self.scheduler.due("3m", now)
@@ -201,7 +219,9 @@ class MultiTimeframeEngine:
         settings = self.engine.settings
         for symbol in self.active_symbols:
             try:
-                bars = self.engine.market_data.get_bars(symbol, "1Min", 30)
+                spike_tf = self._spike_timeframe(symbol)
+                lookback = 2 if is_crypto_symbol(symbol) else 3
+                bars = self.engine.market_data.get_bars(symbol, spike_tf, 30)
                 tape = self.engine.market_data.get_live_tape(
                     symbol,
                     fallback_price=float(bars["close"].iloc[-1]) if not bars.empty else None,
@@ -214,11 +234,12 @@ class MultiTimeframeEngine:
                     bars,
                     last_price,
                     settings.tf_spike_threshold_pct,
-                    lookback_bars=3,
+                    lookback_bars=lookback,
+                    window_label=f"{lookback} velas {spike_tf}",
                 )
                 self.cache[symbol].spike = spike
                 if spike.detected:
-                    logger.warning("%s | SPIKE 3m | %s", symbol, spike.reason)
+                    logger.warning("%s | spike tf=%s | %s", symbol, spike_tf, spike.reason)
             except Exception as exc:
                 logger.debug("%s | capa 3m fallo: %s", symbol, exc)
 
@@ -226,10 +247,15 @@ class MultiTimeframeEngine:
         settings = self.engine.settings
         for symbol in self.active_symbols:
             try:
-                bars = self.engine.market_data.get_bars(symbol, "9Min", 80)
+                regime_tf = self._regime_timeframe(symbol)
+                bars = self.engine.market_data.get_bars(symbol, regime_tf, 80)
                 structure, struct_ret = analyze_structure(bars)
                 trend, trend_ret = analyze_trend(bars)
-                macro = analyze_macro(bars, settings.tf_macro_strong_pct)
+                macro = analyze_macro(
+                    bars,
+                    settings.tf_macro_strong_pct,
+                    timeframe_label=regime_tf,
+                )
                 entry = self.cache[symbol]
                 entry.structure = structure
                 entry.structure_return_pct = struct_ret
@@ -237,8 +263,9 @@ class MultiTimeframeEngine:
                 entry.trend_return_pct = trend_ret
                 entry.macro = macro
                 logger.info(
-                    "%s | capa 9m | estructura=%s %.2f%% | tendencia=%s %.2f%% | %s",
+                    "%s | tf_regimen=%s | estructura=%s %.2f%% | tendencia=%s %.2f%% | %s",
                     symbol,
+                    regime_tf,
                     structure,
                     struct_ret,
                     trend,
@@ -292,7 +319,8 @@ class MultiTimeframeEngine:
     ) -> None:
         engine = self.engine
         cache = self.cache[symbol]
-        bars = engine.market_data.get_bars(symbol, "6Min", engine.settings.lookback_bars)
+        signal_tf = self._signal_timeframe(symbol)
+        bars = engine.market_data.get_bars(symbol, signal_tf, engine.settings.lookback_bars)
         if bars.empty:
             return
 
@@ -316,7 +344,7 @@ class MultiTimeframeEngine:
         cache.signal = signal
         cache.signal_detail = detail
 
-        # Macro 9m desactivado: TF_MACRO_STRONG_PCT nunca se activó (siempre sideways).
+        # Macro/regimen superior desactivado: TF_MACRO_STRONG_PCT nunca se activó (siempre sideways).
         # cache.trend / has_long / signal no dependen de macro_allows — no muta nada.
         # Para reactivar, descomentar el bloque siguiente.
         # macro = cache.macro or MacroSnapshot("sideways", 0.0, False, False, "macro pendiente")
@@ -326,10 +354,10 @@ class MultiTimeframeEngine:
         #     return
 
         if cache.trend == "bear" and signal is Signal.BUY:
-            logger.info("%s | BUY bloqueado — tendencia 9m bajista", symbol)
+            logger.info("%s | BUY bloqueado — tendencia %s bajista", symbol, self._regime_timeframe(symbol))
             return
         if cache.trend == "bull" and signal is Signal.SELL and not has_long:
-            logger.info("%s | SELL bloqueado — tendencia 9m alcista", symbol)
+            logger.info("%s | SELL bloqueado — tendencia %s alcista", symbol, self._regime_timeframe(symbol))
             return
 
         if signal is Signal.HOLD:
@@ -374,12 +402,18 @@ class MultiTimeframeEngine:
 
         if signal is Signal.BUY and settings.entry_confirmation_enabled:
             higher_tf = None
+            higher_tf_label = self._higher_confirmation_timeframe(symbol)
             try:
                 lookback = max(settings.confirm_momentum_bars + 5, 30)
-                higher_tf = engine.market_data.get_bars(symbol, settings.confirm_higher_tf, lookback)
+                higher_tf = engine.market_data.get_bars(symbol, higher_tf_label, lookback)
             except Exception as exc:
-                logger.debug("%s | velas %s no disponibles: %s", symbol, settings.confirm_higher_tf, exc)
-            confirm = filters.check_entry_confirmation(symbol, bars, higher_tf)
+                logger.debug("%s | velas %s no disponibles: %s", symbol, higher_tf_label, exc)
+            confirm = filters.check_entry_confirmation(
+                symbol,
+                bars,
+                higher_tf,
+                higher_tf_label=higher_tf_label,
+            )
             if not confirm.allowed:
                 logger.info("%s | %s", symbol, confirm.reason)
                 cache.signal_detail = f"{detail} | {confirm.reason}"
@@ -426,6 +460,8 @@ class MultiTimeframeEngine:
         self.trading_mode = mode
         self.active_symbols = symbols
         self.trading_mode_label = label
+        if previous is None or mode != previous:
+            self._sync_intervals_for_mode(reset=True)
 
     def _persist(self) -> None:
         self.store.save(
@@ -436,3 +472,41 @@ class MultiTimeframeEngine:
             trading_mode_label=self.trading_mode_label,
             active_symbols=self.active_symbols,
         )
+
+    def _signal_timeframe(self, symbol: str) -> str:
+        if is_crypto_symbol(symbol):
+            return self.engine.settings.crypto_bar_timeframe
+        return "6Min"
+
+    def _spike_timeframe(self, symbol: str) -> str:
+        if is_crypto_symbol(symbol):
+            return self.engine.settings.crypto_bar_timeframe
+        return "1Min"
+
+    def _regime_timeframe(self, symbol: str) -> str:
+        if is_crypto_symbol(symbol):
+            return self.engine.settings.crypto_regime_timeframe
+        return "9Min"
+
+    def _higher_confirmation_timeframe(self, symbol: str) -> str:
+        if is_crypto_symbol(symbol):
+            return self.engine.settings.crypto_regime_timeframe
+        return self.engine.settings.confirm_higher_tf
+
+    def _sync_intervals_for_mode(self, *, reset: bool = False) -> None:
+        if self.trading_mode is TradingMode.CRYPTO:
+            intervals = {
+                "3m": _timeframe_seconds(self.engine.settings.crypto_bar_timeframe),
+                "6m": _timeframe_seconds(self.engine.settings.crypto_bar_timeframe),
+                "9m": _timeframe_seconds(self.engine.settings.crypto_regime_timeframe),
+            }
+        else:
+            intervals = {
+                "3m": self.engine.settings.tf_3m_seconds,
+                "6m": self.engine.settings.tf_6m_seconds,
+                "9m": self.engine.settings.tf_9m_seconds,
+            }
+        changed = intervals != self.scheduler.intervals
+        self.scheduler.intervals = intervals
+        if reset or changed:
+            self.scheduler.last_run = {}

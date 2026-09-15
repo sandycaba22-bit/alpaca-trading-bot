@@ -62,6 +62,8 @@ class Settings:
     crypto_sma_fast: int
     crypto_sma_slow: int
     bar_timeframe: str
+    crypto_bar_timeframe: str
+    crypto_regime_timeframe: str
     lookback_bars: int
     max_open_positions: int
     position_size_pct: float
@@ -94,6 +96,10 @@ class Settings:
     atr_sl_mult: float = 1.5
     atr_tp_mult: float = 3.0
     atr_trailing_mult: float = 2.0
+    breakeven_activate_pct: float = 0.0015
+    breakeven_activate_atr_mult: float = 0.5
+    breakeven_buffer: float = 0.25
+    breakeven_buffer_atr_mult: float = 0.1
     adx_period: int = 14
     adx_threshold: float = 20.0
     adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
@@ -239,6 +245,12 @@ def load_settings(env_path: Path | None = None) -> Settings:
             os.getenv("CRYPTO_SMA_SLOW"), 21, min_value=3, max_value=400, name="CRYPTO_SMA_SLOW"
         ),
         bar_timeframe=sanitize_timeframe(os.getenv("BAR_TIMEFRAME"), "1Day"),
+        crypto_bar_timeframe=sanitize_timeframe(
+            os.getenv("CRYPTO_BAR_TIMEFRAME"), "15Min"
+        ),
+        crypto_regime_timeframe=sanitize_timeframe(
+            os.getenv("CRYPTO_REGIME_TIMEFRAME"), "30Min"
+        ),
         lookback_bars=bounded_int(
             os.getenv("LOOKBACK_BARS"), 120, min_value=30, max_value=2000, name="LOOKBACK_BARS"
         ),
@@ -345,6 +357,34 @@ def load_settings(env_path: Path | None = None) -> Settings:
             min_value=0.5,
             max_value=8.0,
             name="ATR_TRAILING_MULTIPLIER",
+        ),
+        breakeven_activate_pct=bounded_float(
+            os.getenv("BREAKEVEN_ACTIVATE_PCT"),
+            0.0015,
+            min_value=0.0001,
+            max_value=0.05,
+            name="BREAKEVEN_ACTIVATE_PCT",
+        ),
+        breakeven_activate_atr_mult=bounded_float(
+            os.getenv("BREAKEVEN_ACTIVATE_ATR_MULT"),
+            0.5,
+            min_value=0.1,
+            max_value=3.0,
+            name="BREAKEVEN_ACTIVATE_ATR_MULT",
+        ),
+        breakeven_buffer=bounded_float(
+            os.getenv("BREAKEVEN_BUFFER"),
+            0.25,
+            min_value=0.0,
+            max_value=50.0,
+            name="BREAKEVEN_BUFFER",
+        ),
+        breakeven_buffer_atr_mult=bounded_float(
+            os.getenv("BREAKEVEN_BUFFER_ATR_MULT"),
+            0.1,
+            min_value=0.01,
+            max_value=1.0,
+            name="BREAKEVEN_BUFFER_ATR_MULT",
         ),
         adx_period=bounded_int(os.getenv("ADX_PERIOD"), 14, min_value=5, max_value=50, name="ADX_PERIOD"),
         adx_threshold=bounded_float(

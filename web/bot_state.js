@@ -232,6 +232,9 @@ function createBotState(root, pythonBin) {
     }
 
     async function start() {
+        if (fs.existsSync(path.join(root, 'data', 'LOCAL_DISABLED'))) {
+            throw new Error('Bot local deshabilitado de forma permanente (data/LOCAL_DISABLED)');
+        }
         writePaused(false);
         if (pm2Managed()) {
             try {

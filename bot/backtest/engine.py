@@ -69,6 +69,7 @@ class BacktestEngine:
         quiet: bool = False,
         use_risk_sizing: bool | None = None,
         apply_daily_loss: bool = True,
+        apply_trailing: bool = False,
     ) -> None:
         self.settings = settings
         self.market_data = market_data
@@ -81,6 +82,10 @@ class BacktestEngine:
             atr_sl_mult=settings.atr_sl_mult,
             atr_tp_mult=settings.atr_tp_mult,
             atr_trailing_mult=settings.atr_trailing_mult,
+            breakeven_activate_pct=settings.breakeven_activate_pct,
+            breakeven_activate_atr_mult=settings.breakeven_activate_atr_mult,
+            breakeven_buffer=settings.breakeven_buffer,
+            breakeven_buffer_atr_mult=settings.breakeven_buffer_atr_mult,
         )
         self.flow = flow or PriceFlowFilter(
             max_spread_pct=settings.max_spread_pct,
@@ -92,6 +97,7 @@ class BacktestEngine:
             self.settings.use_fixed_risk_sizing if use_risk_sizing is None else bool(use_risk_sizing)
         )
         self.apply_daily_loss = apply_daily_loss
+        self.apply_trailing = apply_trailing
 
     def run_symbol(self, symbol: str, years: int | None = None) -> BacktestResult:
         years = years or self.settings.backtest_years
@@ -143,6 +149,9 @@ class BacktestEngine:
         pending_sl_mult: float | None = None
         pending_strategy = ""
         entry_strategy = ""
+        live_sl = 0.0
+        live_tp = 0.0
+        live_peak = 0.0
         cooldown_left = 0
         signals = 0
         daily_losses: dict[str, float] = {}
@@ -174,14 +183,32 @@ class BacktestEngine:
                     self.reporter.emit(
                         compute_pnl(symbol, position_qty, entry_price, o, PnLEvent.OPENED)
                     )
+                    levels = self.stops.levels(entry_price, position_qty, o, atr_value)
+                    live_sl = levels.stop_price
+                    live_tp = levels.take_profit_price
+                    live_peak = entry_price
                 pending_buy = False
                 pending_sl_mult = None
                 pending_strategy = ""
 
             if position_qty > 0:
-                reason, exit_px = self.stops.evaluate_bar(
-                    entry_price, position_qty, h, l, c, atr_value
-                )
+                if self.apply_trailing:
+                    live_peak = max(live_peak, h, c)
+                    new_sl, _src = self.stops.trailing_candidate(
+                        entry_price, position_qty, live_peak, live_sl, atr_value
+                    )
+                    if new_sl is not None:
+                        live_sl = new_sl
+                    if live_sl > 0 and l <= live_sl:
+                        reason, exit_px = ExitReason.STOP_LOSS, live_sl
+                    elif live_tp > 0 and h >= live_tp:
+                        reason, exit_px = ExitReason.TAKE_PROFIT, live_tp
+                    else:
+                        reason, exit_px = ExitReason.NONE, c
+                else:
+                    reason, exit_px = self.stops.evaluate_bar(
+                        entry_price, position_qty, h, l, c, atr_value
+                    )
                 signal = self._signal(symbol, hist, True, c)
                 if reason is ExitReason.NONE and signal is Signal.SELL:
                     trades.append(

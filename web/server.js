@@ -19,8 +19,13 @@ function normalizeEnvValue(raw) {
 }
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
 const ROOT = path.join(__dirname, '..');
+if (fs.existsSync(path.join(ROOT, 'data', 'LOCAL_DISABLED'))) {
+    console.error('Panel local deshabilitado de forma permanente (data/LOCAL_DISABLED)');
+    process.exit(1);
+}
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PRIVATE_DIR = path.join(__dirname, 'private');
 
@@ -254,7 +259,7 @@ app.get('/api/chart', requireLogin, (req, res) => {
     if (!/^([A-Z][A-Z0-9.]{0,9}|[A-Z]{2,10}\/USD)$/.test(symbol)) {
         return res.status(400).json({ error: 'Simbolo invalido' });
     }
-    if (!['1Min', '3Min', '5Min', '6Min', '9Min', '15Min', '1Hour', '1Day'].includes(timeframe)) {
+    if (!['1Min', '3Min', '5Min', '6Min', '9Min', '15Min', '30Min', '1Hour', '1Day'].includes(timeframe)) {
         return res.status(400).json({ error: 'Timeframe invalido' });
     }
     runPython(
@@ -312,6 +317,7 @@ app.use(express.static(PUBLIC_DIR, {
     extensions: ['html']
 }));
 
-app.listen(PORT, () => {
-    console.log(`Servidor del panel en http://127.0.0.1:${PORT}`);
+app.listen(PORT, HOST, () => {
+    const shown = HOST === '0.0.0.0' ? '127.0.0.1' : HOST;
+    console.log(`Servidor del panel en http://${shown}:${PORT} (bind ${HOST})`);
 });

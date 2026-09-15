@@ -32,6 +32,7 @@ class TrackedPosition:
     opened_at: str
     current_price: float = 0.0
     trailing_notified: bool = False
+    breakeven_notified: bool = False
     opened_qty: float = 0.0
 
     @property
@@ -77,6 +78,7 @@ class OpenPositionBook:
                     opened_at=str(data.get("opened_at", "")),
                     current_price=float(data.get("current_price", 0.0)),
                     trailing_notified=bool(data.get("trailing_notified", False)),
+                    breakeven_notified=bool(data.get("breakeven_notified", False)),
                     opened_qty=float(data.get("opened_qty", data.get("qty", 0.0)) or 0.0),
                 )
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:

@@ -133,6 +133,12 @@ def main() -> int:
         "scheduler_tick_seconds": settings.scheduler_tick_seconds,
         "poll_interval_seconds": settings.scheduler_tick_seconds,
         "scheduler": scheduler,
+        "timeframes": {
+            "bar_timeframe": settings.bar_timeframe,
+            "confirm_higher_tf": settings.confirm_higher_tf,
+            "crypto_bar_timeframe": settings.crypto_bar_timeframe,
+            "crypto_regime_timeframe": settings.crypto_regime_timeframe,
+        },
         "strategy": public_strategy_snapshot(),
     }
     json.dump(payload, sys.stdout, ensure_ascii=True)

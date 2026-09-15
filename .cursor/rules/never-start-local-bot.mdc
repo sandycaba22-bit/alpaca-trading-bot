@@ -1,0 +1,20 @@
+---
+description: Never start the trading bot or local panel on this Windows PC
+alwaysApply: true
+---
+
+# Local runtime is permanently off
+
+This Windows machine must never run the trading bot or the local web panel.
+
+Forbidden unless the user explicitly reverses this in writing:
+
+- `pm2 start`, `pm2 restart`, `pm2 resurrect`, `npm run pm2:start`
+- `python run_bot.py`, `python main.py` (live loop)
+- starting `web/server.js` or opening the local panel to Start/Resume
+- reinstalling `pm2-windows-startup` or adding a Windows Run/Task entry for PM2
+- deleting `data/LOCAL_DISABLED`
+
+If asked to "check", "test", or "debug" the bot locally: inspect code only. Do not launch processes.
+
+The remote/VPS instance is out of scope unless the user names it.

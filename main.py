@@ -238,6 +238,10 @@ def _live_strategy(settings):
 
 
 def main(argv: list[str] | None = None) -> int:
+    _local_lock = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "LOCAL_DISABLED")
+    if os.path.isfile(_local_lock):
+        print("Bot local deshabilitado de forma permanente (data/LOCAL_DISABLED).", file=sys.stderr)
+        return 1
     args = _parse_args(argv)
     try:
         settings = load_settings()

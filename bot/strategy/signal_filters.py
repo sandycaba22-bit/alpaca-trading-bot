@@ -140,6 +140,7 @@ class SignalFilterLayer:
         symbol: str,
         bars: pd.DataFrame,
         higher_tf_bars: pd.DataFrame | None,
+        higher_tf_label: str | None = None,
     ) -> FilterCheck:
         settings = self.settings
         vol_ok, vol_ratio = volume_vs_average(
@@ -156,7 +157,7 @@ class SignalFilterLayer:
 
         vol_txt = f"{vol_ratio:.2f}x" if vol_ratio is not None else "n/a"
         mom_txt = f"{htf_mom:+.2%}" if htf_mom is not None else "n/a"
-        tf = settings.confirm_higher_tf
+        tf = higher_tf_label or settings.confirm_higher_tf
 
         if vol_ok is True:
             return FilterCheck(

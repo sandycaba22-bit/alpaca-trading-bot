@@ -9,7 +9,14 @@ from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import LimitOrderRequest
 
 from bot.alpaca.client import AlpacaClient
-from bot.alpaca.execution import _round_limit_price, alpaca_reject_detail, classify_order
+from bot.alpaca.execution import (
+    alpaca_reject_detail,
+    classify_order,
+    fetch_asset_rules,
+    normalize_limit_price_for_asset,
+    normalize_order_qty_for_asset,
+    sellable_qty_from_position,
+)
 from bot.market.assets import is_crypto_symbol
 from bot.security.audit import audit
 from bot.security.errors import log_caught
@@ -30,8 +37,30 @@ def submit_resting_limit_sell(
 ) -> tuple[str | None, str]:
     """Coloca una orden límite de venta resting (GTC cripto / DAY acciones)."""
     symbol = sanitize_symbol(symbol)
-    qty = sanitize_qty(qty, fractional=is_crypto_symbol(symbol), mode="floor")
-    px = _round_limit_price(float(limit_price), symbol)
+    rules = fetch_asset_rules(client, symbol)
+    if rules.tradable is False:
+        return None, f"{symbol} no está tradable en Alpaca"
+    sellable_qty = None
+    if not dry_run:
+        try:
+            client.limiter.acquire("trading_read")
+            position = client.trading.get_open_position(symbol)
+        except Exception:
+            position = None
+        if position is not None:
+            sellable_qty = sellable_qty_from_position(position)
+    try:
+        qty = normalize_order_qty_for_asset(
+            qty,
+            symbol=symbol,
+            side=OrderSide.SELL,
+            rules=rules,
+            fractional=is_crypto_symbol(symbol),
+            sellable_qty=sellable_qty,
+        )
+        px = normalize_limit_price_for_asset(float(limit_price), symbol, rules)
+    except Exception as exc:
+        return None, str(exc)
     if qty <= 0 or px <= 0:
         return None, "qty o precio inválido"
 

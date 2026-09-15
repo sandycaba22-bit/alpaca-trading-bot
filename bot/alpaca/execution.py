@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import math
 import sys
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -48,6 +50,110 @@ class OrderSubmitResult:
     filled: bool = False
     resting: bool = False
     order_id: str = ""
+
+
+@dataclass(frozen=True)
+class AssetRules:
+    symbol: str
+    tradable: bool | None = None
+    fractionable: bool | None = None
+    min_order_size: float | None = None
+    min_trade_increment: float | None = None
+    price_increment: float | None = None
+    asset_class: str = ""
+    status: str = ""
+
+
+def _asset_float(raw: Any) -> float | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return value
+
+
+def _floor_to_increment(value: float, increment: float | None) -> float:
+    if value <= 0:
+        return 0.0
+    step = _asset_float(increment)
+    if step is None:
+        return float(value)
+    raw = Decimal(str(value))
+    quant = Decimal(str(step))
+    floored = (raw / quant).to_integral_value(rounding=ROUND_DOWN) * quant
+    return float(floored)
+
+
+def fetch_asset_rules(client: AlpacaClient, symbol: str) -> AssetRules:
+    normalized = normalize_symbol(sanitize_symbol(symbol))
+    candidates = [normalized]
+    compact = normalized.replace("/", "")
+    if compact not in candidates:
+        candidates.append(compact)
+    last_exc: Exception | None = None
+    for candidate in candidates:
+        try:
+            client.limiter.acquire("trading_read")
+            asset = client.trading.get_asset(candidate)
+            return AssetRules(
+                symbol=normalized,
+                tradable=getattr(asset, "tradable", None),
+                fractionable=getattr(asset, "fractionable", None),
+                min_order_size=_asset_float(getattr(asset, "min_order_size", None)),
+                min_trade_increment=_asset_float(getattr(asset, "min_trade_increment", None)),
+                price_increment=_asset_float(getattr(asset, "price_increment", None)),
+                asset_class=str(getattr(asset, "asset_class", "") or ""),
+                status=str(getattr(asset, "status", "") or ""),
+            )
+        except Exception as exc:
+            last_exc = exc
+    if last_exc is not None:
+        logger.debug("%s | metadata de activo no disponible: %s", normalized, type(last_exc).__name__)
+    return AssetRules(symbol=normalized)
+
+
+def normalize_limit_price_for_asset(price: float, symbol: str, rules: AssetRules | None = None) -> float:
+    px = _round_limit_price(price, symbol)
+    active_rules = rules or AssetRules(symbol=normalize_symbol(symbol))
+    if active_rules.price_increment:
+        px = _floor_to_increment(px, active_rules.price_increment)
+    return _round_limit_price(px, symbol) if px > 0 else 0.0
+
+
+def normalize_order_qty_for_asset(
+    qty: float,
+    *,
+    symbol: str,
+    side: OrderSide,
+    rules: AssetRules | None,
+    fractional: bool,
+    sellable_qty: float | None = None,
+) -> float:
+    mode = "floor" if fractional else "round"
+    safe_qty = sanitize_qty(qty, fractional=fractional, mode=mode)
+    active_rules = rules or AssetRules(symbol=normalize_symbol(symbol))
+    if sellable_qty is not None and sellable_qty > 0:
+        safe_qty = min(float(safe_qty), float(sellable_qty))
+    if fractional:
+        safe_qty = _floor_to_increment(safe_qty, active_rules.min_trade_increment)
+        if safe_qty <= 0:
+            raise ValidationError("Cantidad de orden invalida tras aplicar min_trade_increment")
+    else:
+        if active_rules.fractionable is False and abs(safe_qty - round(safe_qty)) > 1e-9:
+            raise ValidationError(f"{symbol} no admite cantidades fraccionarias")
+        safe_qty = float(math.floor(float(safe_qty))) if abs(safe_qty - round(safe_qty)) > 1e-9 else float(safe_qty)
+    min_qty = active_rules.min_order_size
+    if min_qty is not None and safe_qty + 1e-12 < min_qty:
+        raise ValidationError(
+            f"{symbol} qty={safe_qty:g} por debajo de min_order_size={min_qty:g}"
+        )
+    if safe_qty <= 0:
+        raise ValidationError("Cantidad de orden invalida")
+    return float(safe_qty)
 
 
 def alpaca_reject_detail(exc: BaseException) -> str:
@@ -277,6 +383,15 @@ class OrderExecutor:
         self.notifier = notifier
         self.live_account_id = str(live_account_id or "").strip()
         self._live_order_confirmed = False
+        self._asset_rules_cache: dict[str, AssetRules] = {}
+
+    def asset_rules(self, symbol: str, *, force_refresh: bool = False) -> AssetRules:
+        key = normalize_symbol(sanitize_symbol(symbol))
+        if not force_refresh and key in self._asset_rules_cache:
+            return self._asset_rules_cache[key]
+        rules = fetch_asset_rules(self.client, key)
+        self._asset_rules_cache[key] = rules
+        return rules
 
     def get_position(self, symbol: str) -> Position | SimpleNamespace | None:
         symbol = normalize_symbol(sanitize_symbol(symbol))
@@ -375,10 +490,29 @@ class OrderExecutor:
     ) -> OrderSubmitResult:
         symbol = normalize_symbol(sanitize_symbol(symbol))
         fractional = is_crypto_symbol(symbol)
-        qty_mode = "floor" if (fractional and side is OrderSide.SELL) else "round"
-        qty = sanitize_qty(qty, fractional=fractional, mode=qty_mode)
+        rules = self.asset_rules(symbol)
         if side not in (OrderSide.BUY, OrderSide.SELL):
             raise ValidationError("Lado de orden no permitido")
+        if rules.tradable is False:
+            raise ValidationError(f"{symbol} no está tradable en Alpaca")
+
+        sellable_qty: float | None = None
+        if side is OrderSide.SELL and not self.dry_run:
+            broker_position = self.get_position(symbol)
+            if broker_position is None:
+                raise ValidationError(f"No hay posición abierta en {symbol}")
+            sellable_qty = sellable_qty_from_position(broker_position)
+            if sellable_qty <= 0:
+                raise ValidationError(f"No hay qty vendible en {symbol}")
+
+        qty = normalize_order_qty_for_asset(
+            qty,
+            symbol=symbol,
+            side=side,
+            rules=rules,
+            fractional=fractional,
+            sellable_qty=sellable_qty,
+        )
 
         last_price = float(price or 0.0)
         use_limit = False
@@ -400,6 +534,10 @@ class OrderExecutor:
                     side, last_price, bid, ask, limit_spread_pct, symbol
                 )
                 use_limit = bool(limit_price and limit_price > 0)
+
+        if use_limit and limit_price is not None:
+            limit_price = normalize_limit_price_for_asset(limit_price, symbol, rules)
+            use_limit = bool(limit_price and limit_price > 0)
 
         order_type = "limit" if use_limit else "market"
         tif = time_in_force_for(symbol, use_limit=use_limit, stock_tif=time_in_force)

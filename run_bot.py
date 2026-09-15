@@ -38,6 +38,9 @@ def _handle(signum: int, _frame) -> None:
 
 def main() -> int:
     global _child
+    if (ROOT / "data" / "LOCAL_DISABLED").is_file():
+        print("Bot local deshabilitado de forma permanente (data/LOCAL_DISABLED).", file=sys.stderr)
+        return 1
     signal.signal(signal.SIGINT, _handle)
     signal.signal(signal.SIGTERM, _handle)
     if hasattr(signal, "SIGBREAK"):

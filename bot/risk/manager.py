@@ -10,6 +10,7 @@ from bot.alpaca.client import AccountSnapshot
 from bot.config import Settings
 from bot.risk.stops import ExitReason, ProtectiveLevels, StopTakeProfitPolicy
 from bot.market.assets import is_crypto_symbol
+from bot.security.sanitize import floor_fractional_qty
 from bot.storage.params import SymbolParams
 from bot.strategy.base import Signal
 
@@ -38,6 +39,10 @@ class RiskManager:
             atr_sl_mult=settings.atr_sl_mult,
             atr_tp_mult=settings.atr_tp_mult,
             atr_trailing_mult=settings.atr_trailing_mult,
+            breakeven_activate_pct=settings.breakeven_activate_pct,
+            breakeven_activate_atr_mult=settings.breakeven_activate_atr_mult,
+            breakeven_buffer=settings.breakeven_buffer,
+            breakeven_buffer_atr_mult=settings.breakeven_buffer_atr_mult,
         )
 
     def _stops_for(self, symbol: str | None) -> StopTakeProfitPolicy:
@@ -53,6 +58,10 @@ class RiskManager:
             atr_sl_mult=params.atr_stop_mult,
             atr_tp_mult=self.settings.atr_tp_mult,
             atr_trailing_mult=self.settings.atr_trailing_mult,
+            breakeven_activate_pct=self.settings.breakeven_activate_pct,
+            breakeven_activate_atr_mult=self.settings.breakeven_activate_atr_mult,
+            breakeven_buffer=self.settings.breakeven_buffer,
+            breakeven_buffer_atr_mult=self.settings.breakeven_buffer_atr_mult,
         )
 
     def evaluate(
@@ -167,7 +176,7 @@ class RiskManager:
     @staticmethod
     def _normalize_qty(symbol: str, qty: float) -> float:
         if is_crypto_symbol(symbol):
-            qty = round(float(qty), 6)
+            qty = floor_fractional_qty(float(qty), decimals=6)
             return qty if qty >= 0.0001 else 0.0
         qty = math.floor(float(qty))
         return float(qty) if qty >= 1 else 0.0

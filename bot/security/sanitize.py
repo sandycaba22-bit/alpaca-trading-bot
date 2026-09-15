@@ -23,7 +23,9 @@ ALLOWED_API_HOSTS = frozenset(
         "api.alpaca.markets",
     }
 )
-ALLOWED_TIMEFRAMES = frozenset({"1Min", "3Min", "5Min", "6Min", "9Min", "15Min", "1Hour", "1Day"})
+ALLOWED_TIMEFRAMES = frozenset(
+    {"1Min", "3Min", "5Min", "6Min", "9Min", "15Min", "30Min", "1Hour", "1Day"}
+)
 ALLOWED_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 MAX_SYMBOLS = 8
 _TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,16}:[A-Za-z0-9_-]{20,120}$")
