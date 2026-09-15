@@ -7,6 +7,7 @@ from .ratelimit import RateLimitConfig, RateLimiter
 from .sanitize import (
     bounded_float,
     bounded_int,
+    floor_fractional_qty,
     safe_path_under,
     sanitize_api_base_url,
     sanitize_qty,
@@ -25,6 +26,7 @@ __all__ = [
     "audit",
     "bounded_float",
     "bounded_int",
+    "floor_fractional_qty",
     "log_caught",
     "mask_secret",
     "register_secret",

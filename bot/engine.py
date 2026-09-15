@@ -13,7 +13,12 @@ from alpaca.trading.enums import OrderSide
 
 from bot.alpaca.client import AccountSnapshot, AlpacaClient
 from bot.alpaca.market_clock import MarketClockView
-from bot.alpaca.execution import OrderExecutor, OrderSubmitResult, classify_order
+from bot.alpaca.execution import (
+    OrderExecutor,
+    OrderSubmitResult,
+    classify_order,
+    is_insufficient_balance_reject,
+)
 from bot.alpaca.market_data import LiveTape, MarketDataService
 from bot.alpaca.stream import LiveMarketStream
 from bot.config import Settings
@@ -144,6 +149,7 @@ class TradingEngine:
         self._tick_lock = threading.Lock()
         self._pending_lock = threading.Lock()
         self._pending: dict[str, PendingExecution] = {}
+        self._close_cooldown_until: dict[str, float] = {}
         self._last_fill_poll = 0.0
         self.breakout_state = BreakoutStateStore()
         self.signal_filters = SignalFilterLayer(settings, self.breakout_state)
@@ -772,6 +778,12 @@ class TradingEngine:
             pending.reason,
         )
 
+    def _has_pending_close(self, symbol: str) -> bool:
+        key = str(symbol).upper()
+        with self._pending_lock:
+            pending = self._pending.get(key)
+            return pending is not None and pending.is_close
+
     def _queue_execution(self, pending: PendingExecution) -> None:
         now = time.monotonic()
         pending.first_at = pending.first_at or now
@@ -910,6 +922,9 @@ class TradingEngine:
     def _expire_pending(self, pending: PendingExecution) -> None:
         with self._pending_lock:
             self._pending.pop(pending.symbol.upper(), None)
+        if pending.is_close and is_insufficient_balance_reject(pending.last_error):
+            # Evita re-disparar SL cada tick tras agotar reintentos por polvo de qty.
+            self._close_cooldown_until[pending.symbol.upper()] = time.monotonic() + 60.0
         if pending.alerted:
             return
         pending.alerted = True
@@ -1122,10 +1137,17 @@ class TradingEngine:
             new_sl = _ratchet_trailing_stop(tracked, entry, qty, peak_price)
             trail_src = "pct"
         if new_sl is not None:
-            first_activation = not bool(getattr(tracked, "trailing_notified", False))
+            first_be = trail_src == "breakeven" and not bool(
+                getattr(tracked, "breakeven_notified", False)
+            )
+            first_trail = trail_src in {"atr", "pct"} and not bool(
+                getattr(tracked, "trailing_notified", False)
+            )
             old_sl = float(tracked.stop_price)
             tracked.stop_price = new_sl
-            if first_activation:
+            if first_be:
+                tracked.breakeven_notified = True
+            if first_trail:
                 tracked.trailing_notified = True
             self.executor.position_book.save()
             gain_pct = (peak_price / entry - 1.0) * 100.0
@@ -1143,7 +1165,16 @@ class TradingEngine:
                 old_sl,
                 new_sl,
             )
-            if first_activation:
+            if first_be:
+                self.notifier.notify_breakeven_locked(
+                    symbol,
+                    entry,
+                    peak_price,
+                    new_sl,
+                    gain_pct,
+                    event_id=self._event_id(symbol, "breakeven", "lock", tracked=tracked),
+                )
+            elif first_trail:
                 self.notifier.notify_trailing_activated(
                     symbol,
                     entry,
@@ -1185,6 +1216,13 @@ class TradingEngine:
         if self.executor.pending_fills.has_close(symbol):
             logger.info(
                 "%s | %s detectado pero hay orden de cierre en vuelo — no se reenvía",
+                symbol,
+                reason.value,
+            )
+            return
+        if self._has_pending_close(symbol):
+            logger.info(
+                "%s | %s detectado pero cierre ya en cola de reintento — no se reenvía",
                 symbol,
                 reason.value,
             )
@@ -1418,6 +1456,9 @@ class TradingEngine:
             if self.executor.pending_fills.has_close(symbol):
                 logger.info("%s | SELL omitido — ya hay orden de cierre en vuelo", symbol)
                 return
+            if self._has_pending_close(symbol):
+                logger.info("%s | SELL omitido — cierre ya en cola de reintento", symbol)
+                return
             closed = self._close_and_report(
                 symbol, qty, float(position.avg_entry_price), last_price, "signal_6m"
             )
@@ -1558,6 +1599,17 @@ class TradingEngine:
                 existing.order_id if existing else "—",
             )
             return False
+        if self._has_pending_close(symbol):
+            logger.info("%s | cierre ya en cola de reintento — no se reenvía", symbol)
+            return False
+        blocked_until = self._close_cooldown_until.get(symbol.upper(), 0.0)
+        if blocked_until and time.monotonic() < blocked_until:
+            logger.warning(
+                "%s | cierre en cooldown tras rechazo de qty (%.0fs) — no se martillea Alpaca",
+                symbol,
+                max(0.0, blocked_until - time.monotonic()),
+            )
+            return False
         tracked = self.executor.position_book.get(symbol)
         signal_ts = str(getattr(tracked, "opened_at", "") or "") if tracked is not None else ""
         if not signal_ts:
@@ -1614,6 +1666,7 @@ class TradingEngine:
                 )
             )
             return False
+        self._close_cooldown_until.pop(symbol.upper(), None)
         if not result.filled:
             self._watch_resting(
                 result,

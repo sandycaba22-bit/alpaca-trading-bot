@@ -22,7 +22,7 @@ from bot.notify.telegram import TelegramNotifier
 from bot.security.audit import audit
 from bot.security.errors import log_caught
 from bot.security.exceptions import RateLimitError, ValidationError
-from bot.security.sanitize import sanitize_qty, sanitize_symbol
+from bot.security.sanitize import floor_fractional_qty, sanitize_qty, sanitize_symbol
 from bot.security.secrets import redact_text
 from bot.storage.journal import TradeJournal
 from bot.storage.pending_orders import PendingOrderBook
@@ -63,6 +63,52 @@ def alpaca_reject_detail(exc: BaseException) -> str:
     if isinstance(exc, RateLimitError):
         return redact_text(str(exc) or "rate_limit")[:400]
     return redact_text(str(exc) or type(exc).__name__)[:400]
+
+
+def is_insufficient_balance_reject(detail: str) -> bool:
+    """Alpaca 40301000 / insufficient balance por polvo de decimales en crypto."""
+    text = (detail or "").lower()
+    return any(
+        token in text
+        for token in (
+            "insufficient balance",
+            "insufficient qty",
+            "insufficient quantity",
+            "40301000",
+            "not enough",
+        )
+    )
+
+
+def _position_field_raw(position: Any, *names: str) -> str:
+    for name in names:
+        value = getattr(position, name, None)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def sellable_qty_raw_from_position(position: Any) -> str:
+    """String crudo de qty vendible (qty_available preferido)."""
+    return _position_field_raw(position, "qty_available", "available", "qty")
+
+
+def sellable_qty_from_position(position: Any) -> float:
+    """
+    Qty vendible según el broker: prefiere qty_available; si no, qty.
+
+    Usa el string crudo del API para no perder decimales por float.
+    """
+    raw = sellable_qty_raw_from_position(position)
+    if not raw:
+        return 0.0
+    try:
+        return abs(float(raw))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _round_limit_price(price: float, symbol: str) -> float:
@@ -328,7 +374,9 @@ class OrderExecutor:
         attempt: int = 1,
     ) -> OrderSubmitResult:
         symbol = normalize_symbol(sanitize_symbol(symbol))
-        qty = sanitize_qty(qty, fractional=is_crypto_symbol(symbol))
+        fractional = is_crypto_symbol(symbol)
+        qty_mode = "floor" if (fractional and side is OrderSide.SELL) else "round"
+        qty = sanitize_qty(qty, fractional=fractional, mode=qty_mode)
         if side not in (OrderSide.BUY, OrderSide.SELL):
             raise ValidationError("Lado de orden no permitido")
 
@@ -657,6 +705,22 @@ class OrderExecutor:
                 )
         return dust_absorbed
 
+    def _sync_book_qty_to_broker(self, symbol: str, broker_qty: float) -> None:
+        tracked = self.position_book.get(symbol)
+        if tracked is None or broker_qty <= 0:
+            return
+        local = abs(float(tracked.qty))
+        if abs(local - broker_qty) <= 1e-12:
+            return
+        logger.warning(
+            "%s | sync libro→broker antes de cerrar | local=%s broker=%s",
+            symbol,
+            f"{local:g}",
+            f"{broker_qty:g}",
+        )
+        tracked.qty = broker_qty if tracked.qty >= 0 else -broker_qty
+        self.position_book.save()
+
     def close_position(
         self,
         symbol: str,
@@ -676,12 +740,40 @@ class OrderExecutor:
             audit("order_close", "deny", symbol=symbol, reason="no_position")
             return None
 
-        qty = sanitize_qty(abs(float(position.qty)), fractional=is_crypto_symbol(symbol))
-        side = OrderSide.SELL if float(position.qty) > 0 else OrderSide.BUY
-        entry = float(position.avg_entry_price)
-        logger.info("Cerrando posicion %s qty=%s side=%s motivo=%s", symbol, qty, side.value, reason)
+        # Fuente de verdad: qty del broker (qty_available si existe), no el libro local.
+        raw_qty = sellable_qty_raw_from_position(position)
+        try:
+            broker_qty = abs(float(raw_qty)) if raw_qty else 0.0
+        except (TypeError, ValueError):
+            broker_qty = 0.0
+        if broker_qty <= 0:
+            logger.info("No hay qty vendible en %s", symbol)
+            audit("order_close", "deny", symbol=symbol, reason="no_sellable_qty")
+            return None
+
+        fractional = is_crypto_symbol(symbol)
+        if fractional:
+            qty = floor_fractional_qty(raw_qty or broker_qty, decimals=6)
+            qty = sanitize_qty(qty, fractional=True, mode="floor")
+        else:
+            qty = sanitize_qty(broker_qty, fractional=False)
+
+        side = OrderSide.SELL if float(getattr(position, "qty", broker_qty) or broker_qty) > 0 else OrderSide.BUY
+        entry = float(getattr(position, "avg_entry_price", 0) or 0)
+        if not self.dry_run:
+            self._sync_book_qty_to_broker(symbol, abs(float(getattr(position, "qty", broker_qty) or broker_qty)))
+
+        logger.info(
+            "Cerrando posicion %s qty=%s (broker_raw=%s) side=%s motivo=%s",
+            symbol,
+            qty,
+            f"{broker_qty:.10f}".rstrip("0").rstrip("."),
+            side.value,
+            reason,
+        )
         audit("order_close", "allow", symbol=symbol, qty=qty, side=side.value, reason=reason)
-        return self.submit_smart_order(
+
+        result = self.submit_smart_order(
             symbol,
             qty,
             side,
@@ -693,6 +785,110 @@ class OrderExecutor:
             spread_pct=spread_pct,
             limit_spread_pct=limit_spread_pct,
             attempt=attempt,
+        )
+        if (
+            result is not None
+            and not result.accepted
+            and side is OrderSide.SELL
+            and is_insufficient_balance_reject(result.broker_detail)
+            and not self.dry_run
+        ):
+            return self._retry_close_after_insufficient(
+                symbol,
+                price=price,
+                reason=reason,
+                bid=bid,
+                ask=ask,
+                spread_pct=spread_pct,
+                limit_spread_pct=limit_spread_pct,
+                attempt=attempt,
+                prev_qty=qty,
+                prev_detail=result.broker_detail,
+            )
+        return result
+
+    def _retry_close_after_insufficient(
+        self,
+        symbol: str,
+        *,
+        price: float | None,
+        reason: str,
+        bid: float | None,
+        ask: float | None,
+        spread_pct: float | None,
+        limit_spread_pct: float,
+        attempt: int,
+        prev_qty: float,
+        prev_detail: str,
+    ) -> OrderSubmitResult | None:
+        """Relee get_position y vende el remanente exacto (floor) para romper el 40301000."""
+        position = self.get_position(symbol)
+        if position is None:
+            logger.warning(
+                "%s | insufficient balance pero ya no hay posición en broker | %s",
+                symbol,
+                prev_detail,
+            )
+            tracked = self.position_book.get(symbol)
+            if tracked is not None:
+                self.position_book.close(symbol)
+            return None
+
+        broker_raw = sellable_qty_raw_from_position(position)
+        try:
+            broker_qty = abs(float(broker_raw)) if broker_raw else 0.0
+        except (TypeError, ValueError):
+            broker_qty = 0.0
+        if broker_qty <= 0:
+            logger.warning("%s | insufficient balance y qty_available=0 — limpiando libro", symbol)
+            self.position_book.close(symbol)
+            return None
+
+        fractional = is_crypto_symbol(symbol)
+        if fractional:
+            # Un tick más agresivo si el floor a 6 decimales coincidió con el intento fallido.
+            qty = floor_fractional_qty(broker_raw or broker_qty, decimals=6)
+            if abs(qty - prev_qty) <= 1e-12:
+                qty = floor_fractional_qty(broker_raw or broker_qty, decimals=5)
+            if qty <= 0:
+                qty = floor_fractional_qty(broker_raw or broker_qty, decimals=6)
+            try:
+                qty = sanitize_qty(qty, fractional=True, mode="floor")
+            except ValidationError:
+                logger.error("%s | remanente tras floor inválido | raw=%s", symbol, broker_raw)
+                return OrderSubmitResult(accepted=False, broker_detail=prev_detail)
+        else:
+            qty = sanitize_qty(broker_qty, fractional=False)
+
+        self._sync_book_qty_to_broker(symbol, abs(float(getattr(position, "qty", broker_qty) or broker_qty)))
+        entry = float(getattr(position, "avg_entry_price", 0) or 0)
+        logger.warning(
+            "%s | reintento cierre por insufficient balance | prev_qty=%s → broker_qty=%s floor=%s | %s",
+            symbol,
+            f"{prev_qty:g}",
+            f"{broker_qty:.10f}".rstrip("0").rstrip("."),
+            f"{qty:g}",
+            prev_detail,
+        )
+        audit(
+            "order_close_retry",
+            "allow",
+            symbol=symbol,
+            qty=qty,
+            reason=f"insufficient_balance:{reason}",
+        )
+        return self.submit_smart_order(
+            symbol,
+            qty,
+            OrderSide.SELL,
+            price=price,
+            entry_price=entry,
+            reason=reason,
+            bid=bid,
+            ask=ask,
+            spread_pct=spread_pct,
+            limit_spread_pct=limit_spread_pct,
+            attempt=max(1, int(attempt)) + 1,
         )
 
     def _require_live_confirm(self, symbol: str, qty: float, side: OrderSide) -> None:

@@ -260,6 +260,7 @@ class DynamicTakeProfitLayer:
         sell_qty = sanitize_qty(
             total_qty * partial_pct,
             fractional=is_crypto_symbol(symbol),
+            mode="floor",
         )
         if sell_qty <= 0 or sell_qty >= total_qty:
             logger.info(

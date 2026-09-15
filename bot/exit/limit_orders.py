@@ -30,7 +30,7 @@ def submit_resting_limit_sell(
 ) -> tuple[str | None, str]:
     """Coloca una orden límite de venta resting (GTC cripto / DAY acciones)."""
     symbol = sanitize_symbol(symbol)
-    qty = sanitize_qty(qty, fractional=is_crypto_symbol(symbol))
+    qty = sanitize_qty(qty, fractional=is_crypto_symbol(symbol), mode="floor")
     px = _round_limit_price(float(limit_price), symbol)
     if qty <= 0 or px <= 0:
         return None, "qty o precio inválido"

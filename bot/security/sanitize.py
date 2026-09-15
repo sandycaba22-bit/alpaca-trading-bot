@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -238,10 +239,40 @@ def safe_path_under(base_dir: Path, filename: str) -> Path:
     return path
 
 
-def sanitize_qty(qty: float, *, fractional: bool = False) -> float:
+def floor_fractional_qty(qty: float | str, *, decimals: int = 6) -> float:
+    """
+    Redondea hacia abajo a N decimales (nunca hacia arriba).
+
+    Crítico en ventas crypto: round() puede pedir 0.768566 cuando el broker
+    solo tiene 0.768565825 → Alpaca 40301000 insufficient balance.
+    """
+    raw = Decimal(str(qty).strip())
+    if raw <= 0:
+        return 0.0
+    quant = Decimal(1).scaleb(-int(decimals))
+    floored = raw.quantize(quant, rounding=ROUND_DOWN)
+    return float(floored)
+
+
+def sanitize_qty(
+    qty: float,
+    *,
+    fractional: bool = False,
+    mode: str = "round",
+) -> float:
+    """
+    mode:
+      - round: compras / sizing (comportamiento histórico)
+      - floor: cierres / ventas — nunca superar el disponible en el broker
+    """
     if not math.isfinite(qty) or qty <= 0 or qty > 1_000_000:
         raise ValidationError("Cantidad de orden invalida")
     if fractional:
+        if str(mode).lower() == "floor":
+            floored = floor_fractional_qty(qty, decimals=6)
+            if floored <= 0:
+                raise ValidationError("Cantidad de orden invalida")
+            return floored
         return round(float(qty), 6)
     return float(qty)
 
