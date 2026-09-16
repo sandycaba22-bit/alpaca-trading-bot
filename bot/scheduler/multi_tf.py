@@ -285,7 +285,10 @@ class MultiTimeframeEngine:
         clock = engine.client.get_market_clock()
         account = engine.client.snapshot_account_optional()
         if account is None:
-            logger.debug("Capa 6m sin snapshot de cuenta — solo mark-to-market")
+            logger.warning(
+                "Capa 6m sin snapshot de cuenta — se mantienen mark-to-market y cierres, "
+                "pero las nuevas compras quedan bloqueadas hasta recuperar cuenta o cache"
+            )
         positions = {pos.symbol: pos for pos in engine.executor.list_positions()}
 
         position_symbols = list(positions)
@@ -316,8 +319,6 @@ class MultiTimeframeEngine:
             if engine.control.is_paused():
                 return
             if not is_symbol_tradable(symbol, clock):
-                continue
-            if account is None:
                 continue
             self._process_6m_symbol(symbol, account, positions)
             self._sleep_between_crypto_symbols(active_symbols, index)
@@ -354,6 +355,16 @@ class MultiTimeframeEngine:
         )
         cache.signal = signal
         cache.signal_detail = detail
+        logger.info(
+            "%s | eval 6m | señal=%s | detalle=%s | precio=%.4f | spread=%s | htf=%s | posicion=%s",
+            symbol,
+            signal.value,
+            detail,
+            last_price,
+            f"{tape.spread_pct:.4%}" if tape and tape.spread_pct is not None else "n/a",
+            cache.trend or "n/a",
+            "sí" if position is not None else "no",
+        )
 
         # Macro/regimen superior desactivado: TF_MACRO_STRONG_PCT nunca se activó (siempre sideways).
         # cache.trend / has_long / signal no dependen de macro_allows — no muta nada.
@@ -372,7 +383,7 @@ class MultiTimeframeEngine:
             return
 
         if signal is Signal.HOLD:
-            logger.debug("%s | capa 6m HOLD | %s", symbol, detail)
+            logger.info("%s | HOLD 6m | %s", symbol, detail)
             return
 
         settings = engine.settings

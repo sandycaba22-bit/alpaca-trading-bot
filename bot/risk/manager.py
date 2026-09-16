@@ -69,7 +69,7 @@ class RiskManager:
         signal: Signal,
         symbol: str,
         last_price: float,
-        account: AccountSnapshot,
+        account: AccountSnapshot | None,
         open_positions: int,
         has_position: bool,
         atr_value: float | None = None,
@@ -98,6 +98,13 @@ class RiskManager:
 
         if last_price <= 0:
             return RiskDecision(False, 0.0, "precio inválido")
+
+        if account is None:
+            return RiskDecision(
+                False,
+                0.0,
+                "snapshot de cuenta no disponible para dimensionar la entrada",
+            )
 
         cap_notional = min(
             account.equity * self.settings.position_size_pct,

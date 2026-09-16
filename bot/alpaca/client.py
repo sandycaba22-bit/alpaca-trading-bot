@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
@@ -59,6 +60,8 @@ class AlpacaClient:
             api_key=settings.api_key_id,
             secret_key=settings.api_secret_key,
         )
+        self._account_snapshot_cache: AccountSnapshot | None = None
+        self._account_snapshot_cached_at = 0.0
         logger.info(
             "Cliente Alpaca inicializado | paper=%s | base_url=%s | key=%s",
             settings.paper,
@@ -76,7 +79,7 @@ class AlpacaClient:
 
     def snapshot_account(self) -> AccountSnapshot:
         account = self.get_account()
-        return AccountSnapshot(
+        snapshot = AccountSnapshot(
             id=str(account.id),
             status=str(account.status),
             currency=str(account.currency),
@@ -89,6 +92,22 @@ class AlpacaClient:
             account_blocked=bool(account.account_blocked),
             paper=self.settings.paper,
         )
+        self._account_snapshot_cache = snapshot
+        self._account_snapshot_cached_at = time.monotonic()
+        return snapshot
+
+    def cached_account_snapshot(
+        self, max_age_seconds: float | None = 180.0
+    ) -> AccountSnapshot | None:
+        snapshot = self._account_snapshot_cache
+        if snapshot is None:
+            return None
+        if max_age_seconds is None:
+            return snapshot
+        age = max(0.0, time.monotonic() - self._account_snapshot_cached_at)
+        if age > max_age_seconds:
+            return None
+        return snapshot
 
     def get_market_clock(self) -> MarketClockView:
         """Reloj NYSE; si falla, asume cerrado y sigue en modo cripto."""
@@ -105,8 +124,19 @@ class AlpacaClient:
         try:
             return self.snapshot_account()
         except Exception as exc:
-            logger.info(
-                "Cuenta Alpaca no consultada en este ciclo (%s) — el bot sigue en modo híbrido",
+            cached = self.cached_account_snapshot()
+            if cached is not None:
+                age = max(0.0, time.monotonic() - self._account_snapshot_cached_at)
+                logger.warning(
+                    "Cuenta Alpaca no consultada en este ciclo (%s) — usando snapshot cacheado %.1fs "
+                    "para no bloquear señales ni órdenes",
+                    type(exc).__name__,
+                    age,
+                )
+                return cached
+            logger.warning(
+                "Cuenta Alpaca no consultada en este ciclo (%s) — sin cache disponible; "
+                "solo se podrán ejecutar cierres defensivos",
                 type(exc).__name__,
             )
             return None

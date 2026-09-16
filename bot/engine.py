@@ -1296,7 +1296,7 @@ class TradingEngine:
     def _execute_signal(
         self,
         symbol: str,
-        account: AccountSnapshot,
+        account: AccountSnapshot | None,
         positions: dict,
         bars: pd.DataFrame,
         tape: LiveTape | None,
@@ -1319,6 +1319,15 @@ class TradingEngine:
             momentum_pct=momentum_pct(bars["close"], self.settings.momentum_bars),
             atr=atr_value,
         )
+        logger.info(
+            "%s | decisión señal=%s | precio=%.4f | spread=%s | pos_qty=%s | atr=%s",
+            symbol,
+            signal.value,
+            last_price,
+            f"{tape_spread:.4%}" if tape_spread is not None else "n/a",
+            f"{qty:g}",
+            f"{atr_value:.4f}" if atr_value else "n/a",
+        )
 
         ok, flow_reason = self.flow.confirm(signal, ctx)
         if not ok:
@@ -1329,9 +1338,16 @@ class TradingEngine:
                 )
             return
 
-        if signal is Signal.BUY and self._daily_loss_halted(account):
-            logger.info("%s | BUY bloqueado — freno de pérdida diaria", symbol)
-            return
+        if signal is Signal.BUY:
+            if account is None:
+                logger.warning(
+                    "%s | BUY bloqueado — no hay snapshot de cuenta ni cache reciente para dimensionar la orden",
+                    symbol,
+                )
+                return
+            if self._daily_loss_halted(account):
+                logger.info("%s | BUY bloqueado — freno de pérdida diaria", symbol)
+                return
 
         decision = self.risk.evaluate(
             signal=signal,
@@ -1517,7 +1533,7 @@ class TradingEngine:
         position,
         qty: float,
         last_price: float,
-        account: AccountSnapshot,
+        account: AccountSnapshot | None,
         positions: dict,
         atr_value: float | None,
         flow_reason: str,
@@ -1544,6 +1560,12 @@ class TradingEngine:
             )
             return
         if signal is not Signal.BUY:
+            return
+        if account is None:
+            logger.warning(
+                "%s | BUY no encola reintento tras rechazo de flujo porque no hay snapshot de cuenta",
+                symbol,
+            )
             return
         decision = self.risk.evaluate(
             signal=signal,
