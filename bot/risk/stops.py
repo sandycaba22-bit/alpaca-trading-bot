@@ -43,14 +43,14 @@ class StopTakeProfitPolicy:
         max_stop_pct: float = 0.08,
         max_tp_pct: float = 0.20,
         atr_sl_mult: float | None = None,
-        atr_tp_mult: float = 4.5,
-        atr_trailing_mult: float = 2.0,
-        breakeven_activate_pct: float = 0.0015,
-        breakeven_activate_atr_mult: float = 1.5,
+        atr_tp_mult: float = 5.5,
+        atr_trailing_mult: float = 3.0,
+        breakeven_activate_pct: float = 0.006,
+        breakeven_activate_atr_mult: float = 2.5,
         breakeven_buffer: float = 0.25,
-        breakeven_buffer_atr_mult: float = 0.25,
+        breakeven_buffer_atr_mult: float = 0.35,
         use_breakeven_lock: bool = True,
-        min_tp_pct: float = 0.01,
+        min_tp_pct: float = 0.015,
     ) -> None:
         if stop_loss_pct <= 0 or take_profit_pct <= 0:
             raise ValueError("STOP_LOSS_PCT y TAKE_PROFIT_PCT deben ser > 0")
@@ -138,7 +138,11 @@ class StopTakeProfitPolicy:
             and atr_value > 0
             and self.breakeven_activate_atr_mult > 0
         ):
-            activate_dist = float(atr_value) * float(self.breakeven_activate_atr_mult)
+            # En acciones con ATR chico, el múltiplo solo se activa demasiado pronto.
+            activate_dist = max(
+                float(atr_value) * float(self.breakeven_activate_atr_mult),
+                entry_price * float(self.breakeven_activate_pct),
+            )
             buffer = max(0.0, float(atr_value) * float(self.breakeven_buffer_atr_mult))
             if long and peak_price >= entry_price + activate_dist:
                 floor_a = entry_price + buffer
@@ -147,13 +151,15 @@ class StopTakeProfitPolicy:
 
         if atr_value and atr_value > 0:
             offset = atr_value * self.atr_trailing_mult
+            # Chase ATR solo tras un recorrido mínimo (% o offset), para no cortar runners.
+            trail_gate = max(offset, entry_price * max(float(self.breakeven_activate_pct), 0.01))
             if offset <= 0:
                 if floor_a is None:
                     return None, "atr_zero"
-            elif long and peak_price >= entry_price + offset:
+            elif long and peak_price >= entry_price + trail_gate:
                 floor_b = peak_price - offset
                 source_b = "atr"
-            elif (not long) and peak_price <= entry_price - offset:
+            elif (not long) and peak_price <= entry_price - trail_gate:
                 floor_b = peak_price + offset
                 source_b = "atr"
         else:
