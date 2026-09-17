@@ -99,7 +99,7 @@ def _request_shutdown(engine: TradingEngine, *, reason: str, signum: int | None 
 
 
 def _finalize_shutdown(engine: TradingEngine) -> None:
-    engine.shutdown(timeout=5.0)
+    engine.shutdown(timeout=8.0)
     logging.shutdown()
 
 

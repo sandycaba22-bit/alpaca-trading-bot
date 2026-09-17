@@ -126,9 +126,13 @@ class Settings:
     meanrev_atr_sl_mult: float = 1.0
     pullback_ema_period: int = 9
     pullback_volume_mult: float = 1.2
-    pullback_ema_near_pct: float = 0.002
+    pullback_ema_near_pct: float = 0.0045
     trend_pullback_rsi_min: float = 32.0
     trend_pullback_rsi_max: float = 70.0
+    trend_near_high_pct: float = 0.003
+    trend_micro_lookback: int = 3
+    trend_range_lookback: int = 10
+    trend_upper_frac: float = 0.66
     squeeze_width_lookback: int = 20
     squeeze_volume_mult: float = 2.0
     strategy_collision_priority: str = "breakout"
@@ -495,7 +499,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         pullback_ema_near_pct=bounded_float(
             os.getenv("PULLBACK_EMA_NEAR_PCT"),
-            0.002,
+            0.0045,
             min_value=0.0,
             max_value=0.02,
             name="PULLBACK_EMA_NEAR_PCT",
@@ -513,6 +517,34 @@ def load_settings(env_path: Path | None = None) -> Settings:
             min_value=45.0,
             max_value=80.0,
             name="TREND_PULLBACK_RSI_MAX",
+        ),
+        trend_near_high_pct=bounded_float(
+            os.getenv("TREND_NEAR_HIGH_PCT"),
+            0.003,
+            min_value=0.0005,
+            max_value=0.02,
+            name="TREND_NEAR_HIGH_PCT",
+        ),
+        trend_micro_lookback=bounded_int(
+            os.getenv("TREND_MICRO_LOOKBACK"),
+            3,
+            min_value=2,
+            max_value=8,
+            name="TREND_MICRO_LOOKBACK",
+        ),
+        trend_range_lookback=bounded_int(
+            os.getenv("TREND_RANGE_LOOKBACK"),
+            10,
+            min_value=5,
+            max_value=30,
+            name="TREND_RANGE_LOOKBACK",
+        ),
+        trend_upper_frac=bounded_float(
+            os.getenv("TREND_UPPER_FRAC"),
+            0.66,
+            min_value=0.50,
+            max_value=0.90,
+            name="TREND_UPPER_FRAC",
         ),
         squeeze_width_lookback=bounded_int(
             os.getenv("SQUEEZE_WIDTH_LOOKBACK"), 20, min_value=5, max_value=80, name="SQUEEZE_WIDTH_LOOKBACK"

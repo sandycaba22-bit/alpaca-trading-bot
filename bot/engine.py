@@ -342,7 +342,7 @@ class TradingEngine:
         logger.info("stream | motor en modo streaming (REST solo si el socket está abajo)")
 
     def _stop_market_stream(self) -> None:
-        self._shutdown_market_stream(timeout=5.0)
+        self._shutdown_market_stream(timeout=8.0)
 
     def _shutdown_market_stream(self, *, timeout: float = 5.0) -> None:
         if self._stream_shutdown_done:

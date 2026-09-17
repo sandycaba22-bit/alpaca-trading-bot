@@ -60,7 +60,7 @@ module.exports = {
       restart_delay: 8000,
       exp_backoff_restart_delay: 2000,
       // El bot escribe su propio PID; PM2 lo reinicia si se cae
-      kill_timeout: 12000,
+      kill_timeout: 20000,
       env: {
         PYTHONUNBUFFERED: '1',
         BOT_STARTUP_SOURCE: 'pm2',

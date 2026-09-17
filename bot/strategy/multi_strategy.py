@@ -155,6 +155,7 @@ class MultiStrategyOrchestrator(Strategy):
                 has_long=ctx.has_long_position,
                 symbol=ctx.symbol,
                 htf_trend=ctx.htf_trend,
+                slow_period=self.slow_period(ctx.symbol),
             )
             if raw is not Signal.HOLD:
                 candidates.append(
@@ -183,6 +184,8 @@ class MultiStrategyOrchestrator(Strategy):
                         self.settings.meanrev_atr_sl_mult,
                     )
                 )
+            else:
+                holds.append(detail)
 
         if StrategyId.SQUEEZE in enabled:
             raw, detail = detect_squeeze(

@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 MAIN = ROOT / "main.py"
-SHUTDOWN_TIMEOUT = 8.0
+SHUTDOWN_TIMEOUT = 15.0
 
 _child: subprocess.Popen[bytes] | None = None
 
