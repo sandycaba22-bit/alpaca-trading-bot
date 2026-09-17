@@ -166,6 +166,7 @@ class OpenPositionBook:
             (pos.avg_entry_price * old_qty) + (float(fill_price) * abs(float(qty)))
         ) / new_qty
         pos.qty = new_qty if pos.qty >= 0 else -new_qty
+        pos.opened_qty = abs(float(pos.opened_qty or old_qty)) + abs(float(qty))
         self.save()
         return pos
 

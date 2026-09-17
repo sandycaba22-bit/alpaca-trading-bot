@@ -6,7 +6,7 @@ import logging
 import math
 import sys
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -24,7 +24,7 @@ from bot.notify.telegram import TelegramNotifier
 from bot.security.audit import audit
 from bot.security.errors import log_caught
 from bot.security.exceptions import RateLimitError, ValidationError
-from bot.security.sanitize import floor_fractional_qty, sanitize_qty, sanitize_symbol
+from bot.security.sanitize import sanitize_symbol
 from bot.security.secrets import redact_text
 from bot.storage.journal import TradeJournal
 from bot.storage.pending_orders import PendingOrderBook
@@ -76,16 +76,48 @@ def _asset_float(raw: Any) -> float | None:
     return value
 
 
+def _asset_decimal(raw: Any) -> Decimal | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = Decimal(str(raw).strip())
+    except (InvalidOperation, ValueError):
+        return None
+    if not value.is_finite() or value <= 0:
+        return None
+    return value
+
+
 def _floor_to_increment(value: float, increment: float | None) -> float:
     if value <= 0:
         return 0.0
-    step = _asset_float(increment)
+    raw = _asset_decimal(value)
+    step = _asset_decimal(increment)
+    if raw is None:
+        return 0.0
     if step is None:
-        return float(value)
-    raw = Decimal(str(value))
-    quant = Decimal(str(step))
-    floored = (raw / quant).to_integral_value(rounding=ROUND_DOWN) * quant
+        return float(raw)
+    floored = (raw / step).to_integral_value(rounding=ROUND_DOWN) * step
     return float(floored)
+
+
+def _floor_decimal_to_increment(value: Decimal, increment: float | str | Decimal | None) -> Decimal:
+    if value <= 0:
+        return Decimal("0")
+    step = _asset_decimal(increment)
+    if step is None:
+        return value
+    return (value / step).to_integral_value(rounding=ROUND_DOWN) * step
+
+
+def _floor_decimal(value: Decimal, decimals: int = 6) -> Decimal:
+    quant = Decimal(1).scaleb(-int(decimals))
+    return value.quantize(quant, rounding=ROUND_DOWN)
+
+
+def _retry_qty_step(rules: AssetRules | None) -> Decimal:
+    step = _asset_decimal(getattr(rules, "min_trade_increment", None) if rules else None)
+    return step if step is not None else Decimal("0.000001")
 
 
 def fetch_asset_rules(client: AlpacaClient, symbol: str) -> AssetRules:
@@ -125,24 +157,32 @@ def normalize_limit_price_for_asset(price: float, symbol: str, rules: AssetRules
 
 
 def normalize_order_qty_for_asset(
-    qty: float,
+    qty: float | str,
     *,
     symbol: str,
     side: OrderSide,
     rules: AssetRules | None,
     fractional: bool,
-    sellable_qty: float | None = None,
+    sellable_qty: float | str | None = None,
 ) -> float:
-    mode = "floor" if fractional else "round"
-    safe_qty = sanitize_qty(qty, fractional=fractional, mode=mode)
     active_rules = rules or AssetRules(symbol=normalize_symbol(symbol))
-    if sellable_qty is not None and sellable_qty > 0:
-        safe_qty = min(float(safe_qty), float(sellable_qty))
+    safe_qty_dec = _asset_decimal(qty)
+    if safe_qty_dec is None:
+        raise ValidationError("Cantidad de orden invalida")
+    if sellable_qty is not None:
+        sellable_cap = _asset_decimal(sellable_qty)
+        if sellable_cap is not None:
+            safe_qty_dec = min(safe_qty_dec, sellable_cap)
     if fractional:
-        safe_qty = _floor_to_increment(safe_qty, active_rules.min_trade_increment)
-        if safe_qty <= 0:
+        if active_rules.min_trade_increment:
+            safe_qty_dec = _floor_decimal_to_increment(safe_qty_dec, active_rules.min_trade_increment)
+        else:
+            safe_qty_dec = _floor_decimal(safe_qty_dec, decimals=6)
+        if safe_qty_dec <= 0:
             raise ValidationError("Cantidad de orden invalida tras aplicar min_trade_increment")
+        safe_qty = float(safe_qty_dec)
     else:
+        safe_qty = float(safe_qty_dec)
         if active_rules.fractionable is False and abs(safe_qty - round(safe_qty)) > 1e-9:
             raise ValidationError(f"{symbol} no admite cantidades fraccionarias")
         safe_qty = float(math.floor(float(safe_qty))) if abs(safe_qty - round(safe_qty)) > 1e-9 else float(safe_qty)
@@ -890,22 +930,32 @@ class OrderExecutor:
             return None
 
         fractional = is_crypto_symbol(symbol)
-        if fractional:
-            qty = floor_fractional_qty(raw_qty or broker_qty, decimals=6)
-            qty = sanitize_qty(qty, fractional=True, mode="floor")
-        else:
-            qty = sanitize_qty(broker_qty, fractional=False)
-
         side = OrderSide.SELL if float(getattr(position, "qty", broker_qty) or broker_qty) > 0 else OrderSide.BUY
+        rules = self.asset_rules(symbol)
+        qty = normalize_order_qty_for_asset(
+            raw_qty or broker_qty,
+            symbol=symbol,
+            side=side,
+            rules=rules,
+            fractional=fractional,
+            sellable_qty=raw_qty or broker_qty,
+        )
         entry = float(getattr(position, "avg_entry_price", 0) or 0)
+        tracked = self.position_book.get(symbol)
+        book_qty = abs(float(tracked.qty)) if tracked is not None else 0.0
+        opened_qty = abs(float(tracked.opened_qty or tracked.qty)) if tracked is not None else 0.0
         if not self.dry_run:
             self._sync_book_qty_to_broker(symbol, abs(float(getattr(position, "qty", broker_qty) or broker_qty)))
 
         logger.info(
-            "Cerrando posicion %s qty=%s (broker_raw=%s) side=%s motivo=%s",
+            "%s | cierre qty | libro=%s opened=%s broker_raw=%s broker_qty=%s final=%s step=%s side=%s motivo=%s",
             symbol,
-            qty,
+            f"{book_qty:.10f}".rstrip("0").rstrip("."),
+            f"{opened_qty:.10f}".rstrip("0").rstrip("."),
+            raw_qty or "—",
             f"{broker_qty:.10f}".rstrip("0").rstrip("."),
+            f"{qty:.10f}".rstrip("0").rstrip("."),
+            f"{float(rules.min_trade_increment):g}" if rules.min_trade_increment else "default_1e-6",
             side.value,
             reason,
         )
@@ -983,29 +1033,40 @@ class OrderExecutor:
             return None
 
         fractional = is_crypto_symbol(symbol)
-        if fractional:
-            # Un tick más agresivo si el floor a 6 decimales coincidió con el intento fallido.
-            qty = floor_fractional_qty(broker_raw or broker_qty, decimals=6)
-            if abs(qty - prev_qty) <= 1e-12:
-                qty = floor_fractional_qty(broker_raw or broker_qty, decimals=5)
-            if qty <= 0:
-                qty = floor_fractional_qty(broker_raw or broker_qty, decimals=6)
-            try:
-                qty = sanitize_qty(qty, fractional=True, mode="floor")
-            except ValidationError:
-                logger.error("%s | remanente tras floor inválido | raw=%s", symbol, broker_raw)
-                return OrderSubmitResult(accepted=False, broker_detail=prev_detail)
-        else:
-            qty = sanitize_qty(broker_qty, fractional=False)
+        rules = self.asset_rules(symbol, force_refresh=True)
+        try:
+            qty = normalize_order_qty_for_asset(
+                broker_raw or broker_qty,
+                symbol=symbol,
+                side=OrderSide.SELL,
+                rules=rules,
+                fractional=fractional,
+                sellable_qty=broker_raw or broker_qty,
+            )
+            if fractional and abs(qty - prev_qty) <= 1e-12:
+                broker_qty_dec = _asset_decimal(broker_raw or broker_qty) or Decimal("0")
+                retry_source = max(Decimal("0"), broker_qty_dec - _retry_qty_step(rules))
+                qty = normalize_order_qty_for_asset(
+                    str(retry_source),
+                    symbol=symbol,
+                    side=OrderSide.SELL,
+                    rules=rules,
+                    fractional=True,
+                    sellable_qty=broker_raw or broker_qty,
+                )
+        except ValidationError:
+            logger.error("%s | remanente tras normalización inválido | raw=%s", symbol, broker_raw)
+            return OrderSubmitResult(accepted=False, broker_detail=prev_detail)
 
         self._sync_book_qty_to_broker(symbol, abs(float(getattr(position, "qty", broker_qty) or broker_qty)))
         entry = float(getattr(position, "avg_entry_price", 0) or 0)
         logger.warning(
-            "%s | reintento cierre por insufficient balance | prev_qty=%s → broker_qty=%s floor=%s | %s",
+            "%s | reintento cierre por insufficient balance | prev_qty=%s → broker_qty=%s final=%s step=%s | %s",
             symbol,
             f"{prev_qty:g}",
             f"{broker_qty:.10f}".rstrip("0").rstrip("."),
             f"{qty:g}",
+            f"{float(rules.min_trade_increment):g}" if rules.min_trade_increment else "default_1e-6",
             prev_detail,
         )
         audit(
