@@ -39,11 +39,13 @@ class AlpacaClient:
 
     def __init__(self, settings: Settings, limiter: RateLimiter | None = None) -> None:
         self.settings = settings
+        data_budget = max(int(settings.api_data_per_minute), 80)
         self.limiter = limiter or RateLimiter(
             RateLimitConfig(
                 data_per_minute=settings.api_data_per_minute,
                 order_per_minute=settings.order_per_minute,
                 order_per_day=settings.order_per_day,
+                burst_data=data_budget,
             )
         )
         self.trading = TradingClient(

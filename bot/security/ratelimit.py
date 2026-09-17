@@ -15,7 +15,8 @@ class RateLimitConfig:
     data_per_minute: int = 120
     order_per_minute: int = 10
     order_per_day: int = 40
-    burst_data: int = 20
+    # Un ciclo 3m+6m con 2 símbolos puede pedir >20 tokens si no hay cache WS.
+    burst_data: int = 80
     burst_orders: int = 3
 
 

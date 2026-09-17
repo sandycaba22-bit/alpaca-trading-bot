@@ -328,6 +328,32 @@ class TradingEngine:
                 return float(px)
         return float(fallback)
 
+    def live_tape(self, symbol: str, fallback_price: float | None = None) -> LiveTape | None:
+        """Tape desde WS si hay tick/quote; si no, REST (2 tokens data)."""
+        md_symbol = normalize_symbol(symbol)
+        stream = self._stream
+        if stream is not None:
+            last = stream.last_price(md_symbol)
+            bid = ask = spread = None
+            try:
+                bid, ask = stream.last_quote(md_symbol)
+            except Exception:
+                bid = ask = None
+            if bid and ask and ask > 0:
+                spread = (float(ask) - float(bid)) / float(ask)
+                if not last or last <= 0:
+                    last = (float(bid) + float(ask)) / 2.0
+            if last and last > 0:
+                return LiveTape(
+                    symbol=md_symbol,
+                    last_price=float(last),
+                    bid=float(bid) if bid else None,
+                    ask=float(ask) if ask else None,
+                    spread_pct=spread,
+                    source="ws",
+                )
+        return self.market_data.get_live_tape(md_symbol, fallback_price=fallback_price)
+
     def _start_market_stream(self) -> None:
         if self._stream is not None:
             return
@@ -1279,17 +1305,24 @@ class TradingEngine:
         qty = float(position.qty)
         entry = float(position.avg_entry_price)
         md_symbol = normalize_symbol(symbol)
-        bars = self.market_data.get_bars(
-            md_symbol,
-            self.settings.crypto_bar_timeframe if is_crypto_symbol(symbol) else self.settings.bar_timeframe,
-            self.settings.lookback_bars,
-        )
-        fallback = float(bars["close"].iloc[-1]) if not bars.empty else entry
-        tape = self.market_data.get_live_tape(md_symbol, fallback_price=fallback)
-        rest_last = tape.last_price if tape else fallback
-        last_price = self.latest_price(symbol, rest_last)
-        atr_value = last_atr(bars, self.settings.atr_period) if not bars.empty else None
-        atr_value = self._remember_atr(symbol, atr_value)
+        stream_px = self._stream.last_price(md_symbol) if self._stream is not None else None
+        cached_atr = self._atr_cache.get(str(symbol).upper()) or self._atr_cache.get(md_symbol.upper())
+        # Con WS vivo + ATR en cache: mark sin REST (evita quemar el bucket data).
+        if stream_px and stream_px > 0 and cached_atr and cached_atr > 0:
+            last_price = float(stream_px)
+            atr_value = float(cached_atr)
+        else:
+            bars = self.market_data.get_bars(
+                md_symbol,
+                self.settings.crypto_bar_timeframe if is_crypto_symbol(symbol) else self.settings.bar_timeframe,
+                self.settings.lookback_bars,
+            )
+            fallback = float(bars["close"].iloc[-1]) if not bars.empty else entry
+            tape = self.live_tape(md_symbol, fallback_price=fallback)
+            rest_last = tape.last_price if tape else fallback
+            last_price = self.latest_price(symbol, rest_last)
+            atr_value = last_atr(bars, self.settings.atr_period) if not bars.empty else None
+            atr_value = self._remember_atr(symbol, atr_value)
 
         trail_tf = _trailing_bar_timeframe(self.settings, symbol)
         tracked = self.executor.position_book.get(symbol)
@@ -1538,7 +1571,7 @@ class TradingEngine:
                 30,
             )
             fallback = float(bars["close"].iloc[-1]) if not bars.empty else entry
-            tape = self.market_data.get_live_tape(md_symbol, fallback_price=fallback)
+            tape = self.live_tape(md_symbol, fallback_price=fallback)
             last_price = tape.last_price if tape else fallback
             try:
                 if self._close_and_report(symbol, qty, entry, last_price, "mode_switch"):

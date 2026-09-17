@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -25,6 +26,18 @@ from bot.market.assets import is_crypto_symbol
 from bot.security.sanitize import sanitize_symbol
 
 logger = logging.getLogger(__name__)
+
+_BAR_CACHE_TTL_SECONDS: dict[str, float] = {
+    "1Min": 20.0,
+    "3Min": 45.0,
+    "5Min": 60.0,
+    "6Min": 90.0,
+    "9Min": 120.0,
+    "15Min": 180.0,
+    "30Min": 240.0,
+    "1Hour": 400.0,
+    "1Day": 600.0,
+}
 
 
 def _by_symbol(payload: object, symbol: str):
@@ -73,6 +86,7 @@ class MarketDataService:
     def __init__(self, client: AlpacaClient, feed: DataFeed = DataFeed.IEX) -> None:
         self.client = client
         self.feed = feed
+        self._bars_cache: dict[tuple[str, str, int], tuple[float, pd.DataFrame]] = {}
 
     def get_bars(
         self,
@@ -81,11 +95,23 @@ class MarketDataService:
         lookback_bars: int,
     ) -> pd.DataFrame:
         symbol = sanitize_symbol(symbol)
+        cache_key = (symbol, timeframe, int(lookback_bars))
+        ttl = _BAR_CACHE_TTL_SECONDS.get(timeframe, 60.0)
+        cached = self._bars_cache.get(cache_key)
+        if cached is not None:
+            cached_at, frame = cached
+            if (time.monotonic() - cached_at) < ttl and not frame.empty:
+                return frame.copy()
+
         tf = parse_timeframe(timeframe)
         start = self._start_for_lookback(tf, lookback_bars, crypto=is_crypto_symbol(symbol))
         if is_crypto_symbol(symbol):
-            return self._fetch_crypto_bars(symbol, tf, start=start)
-        return self._fetch_stock_bars(symbol, tf, start=start)
+            frame = self._fetch_crypto_bars(symbol, tf, start=start)
+        else:
+            frame = self._fetch_stock_bars(symbol, tf, start=start)
+        if not frame.empty:
+            self._bars_cache[cache_key] = (time.monotonic(), frame)
+        return frame
 
     def get_bars_range(
         self,

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from bot.config import PROJECT_ROOT
 from bot.market.assets import all_symbols, is_crypto_symbol
 from bot.market.mode import TradingMode, is_symbol_tradable, resolve_trading_mode, trading_mode_label
+from bot.security.exceptions import RateLimitError
 from bot.strategy.base import Signal
 from bot.strategy.multi_tf_analysis import (
     MacroSnapshot,
@@ -224,7 +225,7 @@ class MultiTimeframeEngine:
                 spike_tf = self._spike_timeframe(symbol)
                 lookback = 2 if is_crypto_symbol(symbol) else 3
                 bars = self.engine.market_data.get_bars(symbol, spike_tf, 30)
-                tape = self.engine.market_data.get_live_tape(
+                tape = self.engine.live_tape(
                     symbol,
                     fallback_price=float(bars["close"].iloc[-1]) if not bars.empty else None,
                 )
@@ -291,27 +292,17 @@ class MultiTimeframeEngine:
             )
         positions = {pos.symbol: pos for pos in engine.executor.list_positions()}
 
-        position_symbols = list(positions)
-        for index, symbol in enumerate(position_symbols):
+        mark_symbols = list(dict.fromkeys([*positions, *self.active_symbols]))
+        for index, symbol in enumerate(mark_symbols):
             if engine.control.is_paused():
                 return
-            try:
-                engine._mark_to_market(symbol, positions, clock)
-            except Exception:
-                pass
-            self._sleep_between_crypto_symbols(position_symbols, index)
-
-        active_symbols = list(self.active_symbols)
-        for index, symbol in enumerate(active_symbols):
-            if not is_symbol_tradable(symbol, clock):
+            if symbol not in positions and not is_symbol_tradable(symbol, clock):
                 continue
-            if engine.control.is_paused():
-                return
             try:
                 engine._mark_to_market(symbol, positions, clock)
             except Exception:
                 pass
-            self._sleep_between_crypto_symbols(active_symbols, index)
+            self._sleep_between_crypto_symbols(mark_symbols, index)
 
         positions = {pos.symbol: pos for pos in engine.executor.list_positions()}
         active_symbols = list(self.active_symbols)
@@ -320,7 +311,12 @@ class MultiTimeframeEngine:
                 return
             if not is_symbol_tradable(symbol, clock):
                 continue
-            self._process_6m_symbol(symbol, account, positions)
+            try:
+                self._process_6m_symbol(symbol, account, positions)
+            except RateLimitError as exc:
+                logger.warning("%s | capa 6m rate limit — se continúa con el resto | %s", symbol, exc)
+            except Exception as exc:
+                logger.warning("%s | capa 6m fallo: %s", symbol, exc)
             self._sleep_between_crypto_symbols(active_symbols, index)
 
     def _process_6m_symbol(
@@ -336,7 +332,7 @@ class MultiTimeframeEngine:
         if bars.empty:
             return
 
-        tape = engine.market_data.get_live_tape(
+        tape = engine.live_tape(
             symbol, fallback_price=float(bars["close"].iloc[-1])
         )
         last_price = tape.last_price if tape else float(bars["close"].iloc[-1])
