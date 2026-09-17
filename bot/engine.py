@@ -1274,7 +1274,10 @@ class TradingEngine:
         if self._stream is not None:
             peak_price = max(peak_price, self._stream.peak_price(symbol, last_price))
 
-        self.reporter.emit(compute_pnl(symbol, qty, entry, last_price, PnLEvent.UPDATED))
+        tracked = self.executor.position_book.get(symbol)
+        ref_qty = float(tracked.opened_qty or tracked.qty) if tracked is not None else abs(qty)
+        if effective_qty(self.settings, symbol, abs(qty), ref_qty) > 1e-8:
+            self.reporter.emit(compute_pnl(symbol, qty, entry, last_price, PnLEvent.UPDATED))
         levels = self.risk.protective_levels(entry, qty, last_price, atr_value, symbol=symbol)
         logger.debug(
             "%s | mark=%.4f SL=%.4f TP=%.4f | ATR=%s fuente=%s | trail_tf=%s peak=%.4f",
