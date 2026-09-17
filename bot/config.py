@@ -126,6 +126,9 @@ class Settings:
     meanrev_atr_sl_mult: float = 1.0
     pullback_ema_period: int = 9
     pullback_volume_mult: float = 1.2
+    pullback_ema_near_pct: float = 0.002
+    trend_pullback_rsi_min: float = 32.0
+    trend_pullback_rsi_max: float = 70.0
     squeeze_width_lookback: int = 20
     squeeze_volume_mult: float = 2.0
     strategy_collision_priority: str = "breakout"
@@ -489,6 +492,27 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         pullback_volume_mult=bounded_float(
             os.getenv("PULLBACK_VOLUME_MULT"), 1.2, min_value=0.5, max_value=5.0, name="PULLBACK_VOLUME_MULT"
+        ),
+        pullback_ema_near_pct=bounded_float(
+            os.getenv("PULLBACK_EMA_NEAR_PCT"),
+            0.002,
+            min_value=0.0,
+            max_value=0.02,
+            name="PULLBACK_EMA_NEAR_PCT",
+        ),
+        trend_pullback_rsi_min=bounded_float(
+            os.getenv("TREND_PULLBACK_RSI_MIN"),
+            32.0,
+            min_value=20.0,
+            max_value=50.0,
+            name="TREND_PULLBACK_RSI_MIN",
+        ),
+        trend_pullback_rsi_max=bounded_float(
+            os.getenv("TREND_PULLBACK_RSI_MAX"),
+            70.0,
+            min_value=45.0,
+            max_value=80.0,
+            name="TREND_PULLBACK_RSI_MAX",
         ),
         squeeze_width_lookback=bounded_int(
             os.getenv("SQUEEZE_WIDTH_LOOKBACK"), 20, min_value=5, max_value=80, name="SQUEEZE_WIDTH_LOOKBACK"

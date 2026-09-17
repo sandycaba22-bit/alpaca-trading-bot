@@ -91,13 +91,23 @@ class MultiStrategyOrchestrator(Strategy):
                 )
             enabled = (self.force_strategy,)
         candidates: list[StrategyPick] = []
+        holds: list[str] = []
+        htf_bull = str(ctx.htf_trend or "").strip().lower() == "bull"
+        trend_relax = regime.regime is MarketRegime.TREND and htf_bull
 
         if StrategyId.BREAKOUT in enabled:
+            lookback = self.breakout.lookback_for(ctx.symbol)
+            volume_mult = self.breakout.volume_mult_for(ctx.symbol)
+            min_range = self.breakout.min_range_mult_for(ctx.symbol)
+            if trend_relax:
+                lookback = max(8, lookback // 2)
+                volume_mult = max(1.0, volume_mult * 0.80)
+                min_range = max(0.25, min_range * 0.80)
             raw, detail = detect_breakout(
                 ctx.bars,
-                lookback=self.breakout.lookback_for(ctx.symbol),
-                volume_mult=self.breakout.volume_mult_for(ctx.symbol),
-                min_range_atr_mult=self.breakout.min_range_mult_for(ctx.symbol),
+                lookback=lookback,
+                volume_mult=volume_mult,
+                min_range_atr_mult=min_range,
                 atr_period=self.settings.atr_period,
                 has_long=ctx.has_long_position,
                 symbol=ctx.symbol,
@@ -115,6 +125,10 @@ class MultiStrategyOrchestrator(Strategy):
                     candidates.append(
                         StrategyPick(raw, StrategyId.BREAKOUT, detail, regime, None)
                     )
+                else:
+                    holds.append(detail)
+            else:
+                holds.append(detail)
 
         if StrategyId.PULLBACK in enabled:
             raw, detail = detect_pullback(
@@ -128,6 +142,8 @@ class MultiStrategyOrchestrator(Strategy):
                 candidates.append(
                     StrategyPick(raw, StrategyId.PULLBACK, detail, regime, None)
                 )
+            else:
+                holds.append(detail)
 
         want_trend_pb = (
             self.enable_trend_pullback or self.force_strategy is StrategyId.TREND_PULLBACK
@@ -144,6 +160,8 @@ class MultiStrategyOrchestrator(Strategy):
                 candidates.append(
                     StrategyPick(raw, StrategyId.TREND_PULLBACK, detail, regime, None)
                 )
+            else:
+                holds.append(detail)
 
         if StrategyId.MEAN_REV in enabled and regime.regime in (
             MarketRegime.RANGE,
@@ -179,10 +197,11 @@ class MultiStrategyOrchestrator(Strategy):
                 )
 
         if not candidates:
+            extra = " | ".join(holds[:3]) if holds else "sin trigger"
             return StrategyPick(
                 Signal.HOLD,
                 None,
-                f"{regime.regime.value} | {regime.reason} | sin señal",
+                f"{regime.regime.value} | {regime.reason} | sin señal | {extra}",
                 regime,
                 None,
             )

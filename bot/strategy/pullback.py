@@ -39,7 +39,8 @@ def detect_pullback(
     low = float(bars["low"].iloc[-1])
     slow_px = float(slow.iloc[-1])
     ema_px = float(fast.iloc[-1])
-    touched = low <= ema_px <= high
+    near = max(0.0, float(settings.pullback_ema_near_pct)) * ema_px
+    touched = (low - near) <= ema_px <= (high + near)
     vol_ok, vol_ratio = volume_vs_average(
         bars, settings.volume_confirmation_period, settings.pullback_volume_mult
     )

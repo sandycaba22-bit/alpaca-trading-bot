@@ -388,31 +388,9 @@ class MultiTimeframeEngine:
 
         settings = engine.settings
         filters = engine.signal_filters
-        last_strategy = getattr(engine.strategy, "last_strategy", None)
         last_sl_mult = getattr(engine.strategy, "last_sl_mult", None)
-        if last_strategy is not None and getattr(last_strategy, "value", "") == "breakout":
-            slow_period = 50
-            if hasattr(engine.strategy, "slow_period"):
-                slow_period = int(engine.strategy.slow_period(symbol))
-            sma_check = filters.check_sma_bias(symbol, signal, bars, slow_period)
-            if not sma_check.allowed:
-                logger.info("%s | %s", symbol, sma_check.reason)
-                cache.signal_detail = f"{detail} | {sma_check.reason}"
-                engine._notify_signal_filtered(symbol, signal, sma_check.reason)
-                return
-            if settings.adx_filter_enabled:
-                adx_check = filters.check_adx(symbol, bars)
-                if not adx_check.allowed:
-                    logger.info(
-                        "%s | ruptura ignorada por ADX bajo | ADX=%.2f umbral=%.2f | señal=%s",
-                        symbol,
-                        adx_check.value if adx_check.value is not None else -1.0,
-                        adx_check.threshold if adx_check.threshold is not None else settings.adx_threshold,
-                        signal.value,
-                    )
-                    cache.signal_detail = f"{detail} | {adx_check.reason}"
-                    engine._notify_signal_filtered(symbol, signal, adx_check.reason)
-                    return
+        # SMA y ADX de ruptura ya se aplican en el orquestador / selector de régimen.
+        # No se re-filtran aquí para no duplicar el mismo veto.
 
         if signal is Signal.BUY:
             cool = filters.check_cooldown(symbol, bars)
@@ -422,7 +400,12 @@ class MultiTimeframeEngine:
                 engine._notify_signal_filtered(symbol, signal, cool.reason)
                 return
 
-        if signal is Signal.BUY and settings.entry_confirmation_enabled:
+        htf_already_bull = cache.trend == "bull"
+        if (
+            signal is Signal.BUY
+            and settings.entry_confirmation_enabled
+            and not htf_already_bull
+        ):
             higher_tf = None
             higher_tf_label = self._higher_confirmation_timeframe(symbol)
             try:
@@ -441,6 +424,12 @@ class MultiTimeframeEngine:
                 cache.signal_detail = f"{detail} | {confirm.reason}"
                 engine._notify_signal_filtered(symbol, signal, confirm.reason)
                 return
+        elif signal is Signal.BUY and htf_already_bull:
+            logger.info(
+                "%s | confirmación HTF omitida — tendencia %s ya es bull",
+                symbol,
+                self._regime_timeframe(symbol),
+            )
 
         engine._execute_signal(
             symbol,
