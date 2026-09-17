@@ -348,6 +348,13 @@ class LiveMarketStream:
             self._peaks[key] = peak
             return peak
 
+    def reset_peak(self, symbol: str, price: float) -> None:
+        """Reinicia el high de sesión al fill, para no arrastrar máximos previos."""
+        key = str(symbol).upper()
+        px = float(price or 0.0)
+        with self._lock:
+            self._peaks[key] = px if px > 0 else 0.0
+
     def start(self) -> None:
         if self._should_run:
             return

@@ -94,6 +94,17 @@ def _current_bar_high(bars: pd.DataFrame, last_price: float) -> float:
     return max(peak, bar_high) if peak > 0 else bar_high
 
 
+def _peak_since_entry(tracked, last_price: float) -> float:
+    """High de la posición desde el fill. No usa máximos de sesión anteriores a la entrada."""
+    entry = float(getattr(tracked, "avg_entry_price", 0) or 0)
+    last = float(last_price or 0)
+    stored = float(getattr(tracked, "peak_price", 0) or 0)
+    peak = max(v for v in (entry, last, stored) if v > 0) if any(v > 0 for v in (entry, last, stored)) else 0.0
+    if tracked is not None and peak > 0:
+        tracked.peak_price = peak
+    return peak
+
+
 def _ratchet_trailing_stop(tracked, entry: float, qty: float, peak_price: float) -> float | None:
     """Fallback % fijo si no hay ATR. El motor prefiere RiskManager.trailing_stop."""
     if tracked is None or qty <= 0 or entry <= 0 or peak_price <= 0:
@@ -1010,10 +1021,17 @@ class TradingEngine:
         self._on_buy_filled(pending.symbol)
 
     def _on_buy_filled(self, symbol: str, atr_value: float | None = None) -> None:
-        """Hook post-compra: registra TP dinámico (capa paralela)."""
+        """Hook post-compra: peak de trailing desde el fill + TP dinámico."""
+        tracked = self.executor.position_book.get(symbol)
+        if tracked is not None:
+            entry = float(tracked.avg_entry_price or 0.0)
+            if entry > 0:
+                tracked.peak_price = max(float(tracked.peak_price or 0.0), entry)
+                self.executor.position_book.save()
+            if self._stream is not None and entry > 0:
+                self._stream.reset_peak(symbol, entry)
         if not self.settings.dynamic_tp_enabled:
             return
-        tracked = self.executor.position_book.get(symbol)
         if tracked is None:
             return
         atr = atr_value if atr_value is not None else self._atr_cache.get(str(symbol).upper())
@@ -1038,9 +1056,7 @@ class TradingEngine:
                 return
             qty = float(tracked.qty)
             entry = float(tracked.avg_entry_price)
-            peak = tick_price
-            if self._stream is not None:
-                peak = self._stream.peak_price(symbol, tick_price)
+            peak = _peak_since_entry(tracked, tick_price)
             atr_value = self._atr_cache.get(symbol.upper())
             if self.settings.dynamic_tp_enabled:
                 bid, ask, spread = self._live_quote(symbol, None)
@@ -1138,6 +1154,16 @@ class TradingEngine:
         if new_sl is None and atr_value is None:
             new_sl = _ratchet_trailing_stop(tracked, entry, qty, peak_price)
             trail_src = "pct"
+        if new_sl is not None:
+            if last_price > 0 and new_sl >= last_price:
+                logger.warning(
+                    "%s | trailing ignorado — SL %.4f >= last %.4f (peak inflado o no realizado)",
+                    symbol,
+                    new_sl,
+                    last_price,
+                )
+                new_sl = None
+                trail_src = "ignored"
         if new_sl is not None:
             first_be = trail_src == "breakeven" and not bool(
                 getattr(tracked, "breakeven_notified", False)
@@ -1266,15 +1292,9 @@ class TradingEngine:
         atr_value = self._remember_atr(symbol, atr_value)
 
         trail_tf = _trailing_bar_timeframe(self.settings, symbol)
-        try:
-            trail_bars = self.market_data.get_bars(md_symbol, trail_tf, 8)
-        except Exception:
-            trail_bars = bars
-        peak_price = _current_bar_high(trail_bars, last_price)
-        if self._stream is not None:
-            peak_price = max(peak_price, self._stream.peak_price(symbol, last_price))
-
         tracked = self.executor.position_book.get(symbol)
+        peak_price = _peak_since_entry(tracked, last_price) if tracked is not None else last_price
+
         ref_qty = float(tracked.opened_qty or tracked.qty) if tracked is not None else abs(qty)
         if effective_qty(self.settings, symbol, abs(qty), ref_qty) > 1e-8:
             self.reporter.emit(compute_pnl(symbol, qty, entry, last_price, PnLEvent.UPDATED))

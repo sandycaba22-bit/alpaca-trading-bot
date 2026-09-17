@@ -34,6 +34,7 @@ class TrackedPosition:
     trailing_notified: bool = False
     breakeven_notified: bool = False
     opened_qty: float = 0.0
+    peak_price: float = 0.0
 
     @property
     def side(self) -> str:
@@ -80,6 +81,7 @@ class OpenPositionBook:
                     trailing_notified=bool(data.get("trailing_notified", False)),
                     breakeven_notified=bool(data.get("breakeven_notified", False)),
                     opened_qty=float(data.get("opened_qty", data.get("qty", 0.0)) or 0.0),
+                    peak_price=float(data.get("peak_price", 0.0) or 0.0),
                 )
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             logger.warning("No se pudo cargar libro de posiciones: %s", type(exc).__name__)
@@ -126,6 +128,7 @@ class OpenPositionBook:
             opened_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             current_price=float(entry_price),
             opened_qty=float(qty),
+            peak_price=float(entry_price),
         )
         self._positions[key] = pos
         self.save()
@@ -145,7 +148,10 @@ class OpenPositionBook:
         pos = self.get(symbol)
         if pos is None:
             return
-        pos.current_price = float(last_price)
+        last = float(last_price)
+        pos.current_price = last
+        entry = float(pos.avg_entry_price or 0.0)
+        pos.peak_price = max(float(pos.peak_price or 0.0), last if last > 0 else 0.0, entry)
         self.save()
 
     def close(self, symbol: str) -> TrackedPosition | None:

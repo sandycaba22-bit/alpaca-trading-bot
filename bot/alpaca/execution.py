@@ -527,6 +527,7 @@ class OrderExecutor:
         spread_pct: float | None = None,
         limit_spread_pct: float = 0.0015,
         attempt: int = 1,
+        force_market: bool = False,
     ) -> OrderSubmitResult:
         symbol = normalize_symbol(sanitize_symbol(symbol))
         fractional = is_crypto_symbol(symbol)
@@ -558,7 +559,13 @@ class OrderExecutor:
         use_limit = False
         limit_price: float | None = None
         wide_spread_market = False
-        if spread_pct is not None and spread_pct > float(limit_spread_pct):
+        if force_market:
+            logger.info(
+                "%s | %s de emergencia — market (sin limit)",
+                symbol,
+                reason,
+            )
+        elif spread_pct is not None and spread_pct > float(limit_spread_pct):
             fractional_stock = (not is_crypto_symbol(symbol)) and abs(qty - round(qty)) > 1e-9
             if fractional_stock:
                 wide_spread_market = True
@@ -910,6 +917,7 @@ class OrderExecutor:
         spread_pct: float | None = None,
         limit_spread_pct: float = 0.0015,
         attempt: int = 1,
+        force_market: bool | None = None,
     ) -> OrderSubmitResult | None:
         symbol = normalize_symbol(sanitize_symbol(symbol))
         position = self.get_position(symbol)
@@ -961,6 +969,10 @@ class OrderExecutor:
         )
         audit("order_close", "allow", symbol=symbol, qty=qty, side=side.value, reason=reason)
 
+        urgent = force_market if force_market is not None else str(reason).lower() in {
+            "stop_loss",
+            "take_profit",
+        }
         result = self.submit_smart_order(
             symbol,
             qty,
@@ -973,6 +985,7 @@ class OrderExecutor:
             spread_pct=spread_pct,
             limit_spread_pct=limit_spread_pct,
             attempt=attempt,
+            force_market=urgent,
         )
         if (
             result is not None
@@ -1088,6 +1101,7 @@ class OrderExecutor:
             spread_pct=spread_pct,
             limit_spread_pct=limit_spread_pct,
             attempt=max(1, int(attempt)) + 1,
+            force_market=str(reason).lower() in {"stop_loss", "take_profit"},
         )
 
     def _require_live_confirm(self, symbol: str, qty: float, side: OrderSide) -> None:
