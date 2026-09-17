@@ -17,11 +17,11 @@ from bot.alpaca.execution import (
     normalize_order_qty_for_asset,
     sellable_qty_from_position,
 )
-from bot.market.assets import is_crypto_symbol
+from bot.market.assets import is_crypto_symbol, normalize_symbol
 from bot.security.audit import audit
 from bot.security.errors import log_caught
 from bot.security.exceptions import RateLimitError
-from bot.security.sanitize import sanitize_qty, sanitize_symbol
+from bot.security.sanitize import sanitize_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +42,19 @@ def submit_resting_limit_sell(
         return None, f"{symbol} no está tradable en Alpaca"
     sellable_qty = None
     if not dry_run:
-        try:
-            client.limiter.acquire("trading_read")
-            position = client.trading.get_open_position(symbol)
-        except Exception:
-            position = None
+        position = None
+        lookup_symbols = [symbol]
+        compact = normalize_symbol(symbol).replace("/", "")
+        if compact and compact not in lookup_symbols:
+            lookup_symbols.append(compact)
+        for lookup_symbol in lookup_symbols:
+            try:
+                client.limiter.acquire("trading_read")
+                position = client.trading.get_open_position(lookup_symbol)
+                if position is not None:
+                    break
+            except Exception:
+                position = None
         if position is not None:
             sellable_qty = sellable_qty_from_position(position)
     try:

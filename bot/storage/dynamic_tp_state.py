@@ -23,6 +23,7 @@ class DynamicTpRow:
     tp_pct: float
     order_id: str
     order_qty: float
+    filled_qty: float = 0.0
     gap_partial_done: bool = False
     atr_value: float | None = None
 
@@ -35,6 +36,7 @@ class DynamicTpRow:
             tp_pct=float(data.get("tp_pct", 0.0)),
             order_id=str(data.get("order_id", "")),
             order_qty=float(data.get("order_qty", 0.0)),
+            filled_qty=float(data.get("filled_qty", 0.0) or 0.0),
             gap_partial_done=bool(data.get("gap_partial_done", False)),
             atr_value=(
                 float(data["atr_value"])

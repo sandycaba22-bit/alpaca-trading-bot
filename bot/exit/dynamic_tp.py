@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from alpaca.trading.enums import OrderSide
 
+from bot.alpaca.execution import normalize_order_qty_for_asset
 from bot.exit.limit_orders import (
     cancel_order,
     fetch_order,
@@ -14,8 +15,8 @@ from bot.exit.limit_orders import (
     submit_resting_limit_sell,
 )
 from bot.market.assets import is_crypto_symbol
+from bot.market.dust import effective_qty
 from bot.reporting.pnl import PnLEvent, compute_pnl
-from bot.security.sanitize import sanitize_qty
 from bot.storage.dynamic_tp_state import DynamicTpRow, DynamicTpStateStore
 
 if TYPE_CHECKING:
@@ -88,7 +89,9 @@ class DynamicTakeProfitLayer:
 
         existing = self.store.get(symbol)
         if existing and existing.order_id:
-            cancel_order(engine.client, existing.order_id, symbol=symbol)
+            if not cancel_order(engine.client, existing.order_id, symbol=symbol):
+                logger.warning("%s | dynamic TP omitido — no se pudo reemplazar la orden previa", symbol)
+                return
 
         order_id, detail = submit_resting_limit_sell(
             engine.client,
@@ -109,6 +112,7 @@ class DynamicTakeProfitLayer:
                 tp_pct=tp_pct,
                 order_id=order_id,
                 order_qty=qty,
+                filled_qty=0.0,
                 gap_partial_done=False,
                 atr_value=atr_value,
             )
@@ -123,13 +127,15 @@ class DynamicTakeProfitLayer:
             order_id,
         )
 
-    def cancel_for_symbol(self, engine: TradingEngine, symbol: str) -> None:
+    def cancel_for_symbol(self, engine: TradingEngine, symbol: str) -> bool:
         row = self.store.get(symbol)
         if row is None:
-            return
-        if row.order_id:
-            cancel_order(engine.client, row.order_id, symbol=symbol)
+            return True
+        if row.order_id and not cancel_order(engine.client, row.order_id, symbol=symbol):
+            logger.warning("%s | dynamic TP no se pudo cancelar; se conserva la protección", symbol)
+            return False
         self.store.remove(symbol)
+        return True
 
     def on_tick(
         self,
@@ -172,7 +178,13 @@ class DynamicTakeProfitLayer:
         if row.order_id and row.order_id.startswith("dry_run"):
             if engine.executor.dry_run and last_price >= row.tp_price:
                 return self._finalize_limit_fill(
-                    engine, symbol, row, tracked, row.tp_price, float(tracked.qty)
+                    engine,
+                    symbol,
+                    row,
+                    tracked,
+                    row.tp_price,
+                    total_filled_qty=float(tracked.qty),
+                    order_filled=True,
                 )
             return False
         if not row.order_id:
@@ -182,10 +194,19 @@ class DynamicTakeProfitLayer:
         if order is None:
             return False
         kind, filled_qty, fill_price = order_fill_snapshot(order)
-        if kind != "filled" or filled_qty <= 0:
+        total_filled = min(float(filled_qty), float(row.order_qty))
+        if total_filled <= float(row.filled_qty or 0.0) + 1e-8:
             return False
         px = fill_price if fill_price > 0 else row.tp_price
-        return self._finalize_limit_fill(engine, symbol, row, tracked, px, filled_qty)
+        return self._finalize_limit_fill(
+            engine,
+            symbol,
+            row,
+            tracked,
+            px,
+            total_filled_qty=total_filled,
+            order_filled=kind == "filled",
+        )
 
     def _finalize_limit_fill(
         self,
@@ -194,49 +215,104 @@ class DynamicTakeProfitLayer:
         row: DynamicTpRow,
         tracked: TrackedPosition,
         fill_price: float,
-        filled_qty: float,
+        *,
+        total_filled_qty: float,
+        order_filled: bool,
     ) -> bool:
         entry = float(tracked.avg_entry_price)
-        qty = min(float(filled_qty), float(tracked.qty))
-        if qty <= 0:
-            self.store.remove(symbol)
+        prev_filled = float(row.filled_qty or 0.0)
+        qty = min(float(total_filled_qty), float(tracked.qty)) - prev_filled
+        qty = max(0.0, float(qty))
+        if qty <= 1e-8:
             return False
 
+        dust_qty = engine.executor._record_fill(
+            symbol,
+            qty,
+            OrderSide.SELL,
+            fill_price,
+            entry_price=entry,
+            reason=REASON_LIMIT,
+            dry_run=engine.executor.dry_run,
+            order_id=row.order_id,
+            stop_price=getattr(tracked, "stop_price", None),
+            take_profit_price=getattr(tracked, "take_profit_price", None),
+            stop_pct=getattr(tracked, "stop_pct", None),
+            take_profit_pct=getattr(tracked, "take_profit_pct", None),
+        )
         if not engine.executor.dry_run:
-            engine.executor._record_fill(
-                symbol,
-                qty,
-                OrderSide.SELL,
-                fill_price,
-                entry_price=entry,
-                reason=REASON_LIMIT,
-                dry_run=False,
-                order_id=row.order_id,
-            )
+            remaining = engine._reconcile_book_qty_from_broker(symbol)
         else:
-            engine.executor.position_book.close(symbol)
+            current = engine.executor.position_book.get(symbol)
+            remaining = abs(float(current.qty)) if current is not None else 0.0
 
-        self.store.remove(symbol)
-        engine._note_position_closed(symbol, REASON_LIMIT)
         snap = compute_pnl(symbol, qty, entry, fill_price, PnLEvent.CLOSED)
         engine.reporter.emit(snap)
-        engine.notifier.notify_closed(
-            symbol,
-            qty,
-            entry,
-            fill_price,
-            snap.pnl_abs,
-            snap.pnl_pct,
-            REASON_LIMIT,
-            engine.executor.dry_run,
-            event_id=engine._event_id(symbol, "close", REASON_LIMIT, tracked=tracked),
-        )
+        ref_qty = float(tracked.opened_qty or tracked.qty)
+        remaining_eff = effective_qty(engine.settings, symbol, remaining, ref_qty)
+        event_id = engine._event_id(symbol, "close", REASON_LIMIT, tracked=tracked)
+        row.filled_qty = float(total_filled_qty)
+        if order_filled:
+            self.store.remove(symbol)
+            if remaining_eff > 1e-8:
+                engine.notifier.notify_partial_close(
+                    symbol,
+                    qty,
+                    remaining_eff,
+                    entry,
+                    fill_price,
+                    snap.pnl_abs,
+                    snap.pnl_pct,
+                    REASON_LIMIT,
+                    "filled",
+                    float(row.order_qty),
+                    engine.executor.dry_run,
+                    event_id=event_id,
+                )
+                refreshed = engine.executor.position_book.get(symbol)
+                if refreshed is not None:
+                    self.register_entry(engine, symbol, refreshed, row.atr_value)
+            else:
+                engine._note_position_closed(symbol, REASON_LIMIT)
+                engine.notifier.notify_closed(
+                    symbol,
+                    qty,
+                    entry,
+                    fill_price,
+                    snap.pnl_abs,
+                    snap.pnl_pct,
+                    REASON_LIMIT,
+                    engine.executor.dry_run,
+                    event_id=event_id,
+                    dust_qty=dust_qty,
+                )
+        else:
+            self.store.upsert(row)
+            if remaining_eff > 1e-8:
+                engine.notifier.notify_partial_close(
+                    symbol,
+                    qty,
+                    remaining_eff,
+                    entry,
+                    fill_price,
+                    snap.pnl_abs,
+                    snap.pnl_pct,
+                    REASON_LIMIT,
+                    "partial",
+                    float(row.order_qty),
+                    engine.executor.dry_run,
+                    event_id=event_id,
+                )
         logger.info(
-            "%s | dynamic TP limit fill | qty=%s @ %.4f entry=%.4f",
+            "%s | dynamic TP limit fill | +%s @ %.4f entry=%.4f | acumulado=%s/%s | remaining=%s | status=%s",
             symbol,
             qty,
             fill_price,
             entry,
+            f"{float(row.filled_qty):g}",
+            f"{float(row.order_qty):g}",
+            f"{remaining_eff:g}",
+            "filled" if order_filled else "partial",
         )
         return True
 
@@ -257,11 +333,18 @@ class DynamicTakeProfitLayer:
             return False
 
         partial_pct = float(self.settings.dynamic_tp_gap_sell_pct)
-        sell_qty = sanitize_qty(
-            total_qty * partial_pct,
-            fractional=is_crypto_symbol(symbol),
-            mode="floor",
-        )
+        try:
+            sell_qty = normalize_order_qty_for_asset(
+                total_qty * partial_pct,
+                symbol=symbol,
+                side=OrderSide.SELL,
+                rules=engine.executor.asset_rules(symbol),
+                fractional=is_crypto_symbol(symbol),
+                sellable_qty=total_qty,
+            )
+        except Exception as exc:
+            logger.info("%s | gap en TP %.4f pero qty parcial inválida — %s", symbol, row.tp_price, exc)
+            return False
         if sell_qty <= 0 or sell_qty >= total_qty:
             logger.info(
                 "%s | gap en TP %.4f pero qty parcial inválida — se deja al trailing",
@@ -270,8 +353,9 @@ class DynamicTakeProfitLayer:
             )
             return False
 
-        if row.order_id:
-            cancel_order(engine.client, row.order_id, symbol=symbol)
+        if row.order_id and not cancel_order(engine.client, row.order_id, symbol=symbol):
+            logger.warning("%s | gap TP omitido — no se pudo cancelar el limit TP vigente", symbol)
+            return False
 
         limit_spread = float(engine.settings.order_limit_spread_pct)
         wide = spread is not None and spread > limit_spread
@@ -298,9 +382,9 @@ class DynamicTakeProfitLayer:
         )
         if not result.accepted:
             logger.warning("%s | gap partial rechazada | %s", symbol, result.broker_detail)
-            row.gap_partial_done = True
-            row.order_id = ""
-            self.store.upsert(row)
+            refreshed = engine.executor.position_book.get(symbol)
+            if refreshed is not None:
+                self.register_entry(engine, symbol, refreshed, row.atr_value)
             return False
 
         if not result.filled:

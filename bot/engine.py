@@ -1622,8 +1622,6 @@ class TradingEngine:
         reason: str,
     ) -> bool:
         logger.info("%s | cerrando por %s @ %.4f (entry %.4f)", symbol, reason, last_price, entry_price)
-        if self.settings.dynamic_tp_enabled:
-            self.dynamic_tp.cancel_for_symbol(self, symbol)
         if self.executor.pending_fills.has_close(symbol):
             existing = self.executor.pending_fills.close_for(symbol)
             logger.info(
@@ -1648,6 +1646,16 @@ class TradingEngine:
         if not signal_ts:
             signal_ts = f"{float(entry_price):.4f}"
         event_id = self._event_id(symbol, "close", reason, signal_ts=signal_ts)
+        tp_atr = None
+        restore_dynamic_tp = False
+        if self.settings.dynamic_tp_enabled:
+            tp_row = self.dynamic_tp.store.get(symbol)
+            if tp_row is not None:
+                tp_atr = tp_row.atr_value
+                restore_dynamic_tp = bool(tp_row.order_id)
+                if restore_dynamic_tp and not self.dynamic_tp.cancel_for_symbol(self, symbol):
+                    logger.warning("%s | cierre omitido — no se pudo cancelar el TP dinámico vigente", symbol)
+                    return False
         bid, ask, spread = self._live_quote(symbol, None)
         result = self.executor.close_position(
             symbol,
@@ -1680,8 +1688,14 @@ class TradingEngine:
                 return False
             else:
                 logger.warning("%s | close_position sin orden — no se notifica cierre", symbol)
+                tracked = self.executor.position_book.get(symbol)
+                if restore_dynamic_tp and tracked is not None:
+                    self.dynamic_tp.register_entry(self, symbol, tracked, tp_atr)
                 return False
         elif not result.accepted:
+            tracked = self.executor.position_book.get(symbol)
+            if restore_dynamic_tp and tracked is not None:
+                self.dynamic_tp.register_entry(self, symbol, tracked, tp_atr)
             self._queue_execution(
                 PendingExecution(
                     symbol=symbol,

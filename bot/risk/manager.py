@@ -8,8 +8,9 @@ from dataclasses import dataclass
 
 from bot.alpaca.client import AccountSnapshot
 from bot.config import Settings
-from bot.risk.stops import ExitReason, ProtectiveLevels, StopTakeProfitPolicy
 from bot.market.assets import is_crypto_symbol
+from bot.market.dust import dust_threshold_for
+from bot.risk.stops import ExitReason, ProtectiveLevels, StopTakeProfitPolicy
 from bot.security.sanitize import floor_fractional_qty
 from bot.storage.params import SymbolParams
 from bot.strategy.base import Signal
@@ -180,11 +181,12 @@ class RiskManager:
     def _qty_from_notional(self, symbol: str, last_price: float, notional: float) -> float:
         return self._normalize_qty(symbol, notional / last_price)
 
-    @staticmethod
-    def _normalize_qty(symbol: str, qty: float) -> float:
+    def _normalize_qty(self, symbol: str, qty: float) -> float:
         if is_crypto_symbol(symbol):
             qty = floor_fractional_qty(float(qty), decimals=6)
-            return qty if qty >= 0.0001 else 0.0
+            ref_qty = max(abs(float(qty)), float(self.settings.dust_threshold_min_qty))
+            min_qty = dust_threshold_for(self.settings, symbol, ref_qty)
+            return qty if qty + 1e-12 >= min_qty else 0.0
         qty = math.floor(float(qty))
         return float(qty) if qty >= 1 else 0.0
 
