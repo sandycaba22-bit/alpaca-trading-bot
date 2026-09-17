@@ -9,9 +9,18 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 MAIN = ROOT / "main.py"
 SHUTDOWN_TIMEOUT = 15.0
+
+
+def _venv_python() -> Path:
+    win = ROOT / ".venv" / "Scripts" / "python.exe"
+    nix = ROOT / ".venv" / "bin" / "python"
+    if win.is_file():
+        return win
+    if nix.is_file():
+        return nix
+    return Path(sys.executable)
 
 _child: subprocess.Popen[bytes] | None = None
 
@@ -50,7 +59,7 @@ def main() -> int:
     env.setdefault("PYTHONUNBUFFERED", "1")
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
     _child = subprocess.Popen(
-        [str(PYTHON), str(MAIN)],
+        [str(_venv_python()), str(MAIN)],
         cwd=str(ROOT),
         env=env,
         creationflags=creationflags,

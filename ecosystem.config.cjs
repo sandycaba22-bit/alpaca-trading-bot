@@ -17,7 +17,13 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = __dirname;
-const PYTHON = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
+const PYTHON_WIN = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
+const PYTHON_NIX = path.join(ROOT, '.venv', 'bin', 'python');
+const PYTHON = fs.existsSync(PYTHON_WIN)
+  ? PYTHON_WIN
+  : fs.existsSync(PYTHON_NIX)
+    ? PYTHON_NIX
+    : 'python3';
 const LOG_DIR = path.join(ROOT, 'logs');
 const LOCAL_DISABLED = fs.existsSync(path.join(ROOT, 'data', 'LOCAL_DISABLED'));
 
