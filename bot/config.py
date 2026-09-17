@@ -94,12 +94,13 @@ class Settings:
     backtest_validate_years: int = 3
     log_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "logs")
     atr_sl_mult: float = 1.5
-    atr_tp_mult: float = 3.0
+    atr_tp_mult: float = 4.5
     atr_trailing_mult: float = 2.0
     breakeven_activate_pct: float = 0.0015
-    breakeven_activate_atr_mult: float = 0.5
+    breakeven_activate_atr_mult: float = 1.5
     breakeven_buffer: float = 0.25
-    breakeven_buffer_atr_mult: float = 0.1
+    breakeven_buffer_atr_mult: float = 0.25
+    min_tp_pct: float = 0.01
     adx_period: int = 14
     adx_threshold: float = 20.0
     adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
@@ -147,7 +148,7 @@ class Settings:
     stream_reconnect_min_seconds: float = 2.0
     stream_reconnect_max_seconds: float = 60.0
     dynamic_tp_enabled: bool = False
-    dynamic_tp_atr_mult: float = 3.0
+    dynamic_tp_atr_mult: float = 4.5
     dynamic_tp_base_pct: float = 0.015
     dynamic_tp_max_pct: float = 0.20
     dynamic_tp_gap_sell_pct: float = 0.70
@@ -356,7 +357,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
             name="ATR_SL_MULTIPLIER",
         ),
         atr_tp_mult=bounded_float(
-            os.getenv("ATR_TP_MULTIPLIER"), 3.0, min_value=0.5, max_value=12.0, name="ATR_TP_MULTIPLIER"
+            os.getenv("ATR_TP_MULTIPLIER"), 4.5, min_value=0.5, max_value=12.0, name="ATR_TP_MULTIPLIER"
         ),
         atr_trailing_mult=bounded_float(
             os.getenv("ATR_TRAILING_MULTIPLIER"),
@@ -374,7 +375,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         breakeven_activate_atr_mult=bounded_float(
             os.getenv("BREAKEVEN_ACTIVATE_ATR_MULT"),
-            0.5,
+            1.5,
             min_value=0.1,
             max_value=3.0,
             name="BREAKEVEN_ACTIVATE_ATR_MULT",
@@ -388,10 +389,17 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         breakeven_buffer_atr_mult=bounded_float(
             os.getenv("BREAKEVEN_BUFFER_ATR_MULT"),
-            0.1,
+            0.25,
             min_value=0.01,
             max_value=1.0,
             name="BREAKEVEN_BUFFER_ATR_MULT",
+        ),
+        min_tp_pct=bounded_float(
+            os.getenv("MIN_TP_PCT"),
+            0.01,
+            min_value=0.0,
+            max_value=0.10,
+            name="MIN_TP_PCT",
         ),
         adx_period=bounded_int(os.getenv("ADX_PERIOD"), 14, min_value=5, max_value=50, name="ADX_PERIOD"),
         adx_threshold=bounded_float(
@@ -622,7 +630,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         dynamic_tp_enabled=_as_bool(os.getenv("DYNAMIC_TP_ENABLED"), default=False),
         dynamic_tp_atr_mult=bounded_float(
             os.getenv("DYNAMIC_TP_ATR_MULT"),
-            3.0,
+            4.5,
             min_value=0.5,
             max_value=10.0,
             name="DYNAMIC_TP_ATR_MULT",

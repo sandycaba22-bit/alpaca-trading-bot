@@ -44,6 +44,7 @@ class RiskManager:
             breakeven_activate_atr_mult=settings.breakeven_activate_atr_mult,
             breakeven_buffer=settings.breakeven_buffer,
             breakeven_buffer_atr_mult=settings.breakeven_buffer_atr_mult,
+            min_tp_pct=settings.min_tp_pct,
         )
 
     def _stops_for(self, symbol: str | None) -> StopTakeProfitPolicy:
@@ -63,6 +64,7 @@ class RiskManager:
             breakeven_activate_atr_mult=self.settings.breakeven_activate_atr_mult,
             breakeven_buffer=self.settings.breakeven_buffer,
             breakeven_buffer_atr_mult=self.settings.breakeven_buffer_atr_mult,
+            min_tp_pct=self.settings.min_tp_pct,
         )
 
     def evaluate(
@@ -208,6 +210,11 @@ class RiskManager:
                 atr_sl_mult=float(atr_sl_mult),
                 atr_tp_mult=policy.atr_tp_mult,
                 atr_trailing_mult=policy.atr_trailing_mult,
+                breakeven_activate_pct=policy.breakeven_activate_pct,
+                breakeven_activate_atr_mult=policy.breakeven_activate_atr_mult,
+                breakeven_buffer=policy.breakeven_buffer,
+                breakeven_buffer_atr_mult=policy.breakeven_buffer_atr_mult,
+                min_tp_pct=policy.min_tp_pct,
             )
         return policy.levels(entry_price, qty, last_price, atr_value)
 

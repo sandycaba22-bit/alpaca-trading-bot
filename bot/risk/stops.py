@@ -43,13 +43,14 @@ class StopTakeProfitPolicy:
         max_stop_pct: float = 0.08,
         max_tp_pct: float = 0.20,
         atr_sl_mult: float | None = None,
-        atr_tp_mult: float = 3.0,
+        atr_tp_mult: float = 4.5,
         atr_trailing_mult: float = 2.0,
         breakeven_activate_pct: float = 0.0015,
-        breakeven_activate_atr_mult: float = 0.5,
+        breakeven_activate_atr_mult: float = 1.5,
         breakeven_buffer: float = 0.25,
-        breakeven_buffer_atr_mult: float = 0.1,
+        breakeven_buffer_atr_mult: float = 0.25,
         use_breakeven_lock: bool = True,
+        min_tp_pct: float = 0.01,
     ) -> None:
         if stop_loss_pct <= 0 or take_profit_pct <= 0:
             raise ValueError("STOP_LOSS_PCT y TAKE_PROFIT_PCT deben ser > 0")
@@ -61,6 +62,7 @@ class StopTakeProfitPolicy:
         self.atr_trailing_mult = atr_trailing_mult
         self.max_stop_pct = max_stop_pct
         self.max_tp_pct = max_tp_pct
+        self.min_tp_pct = max(0.0, float(min_tp_pct))
         self.breakeven_activate_pct = breakeven_activate_pct
         self.breakeven_activate_atr_mult = breakeven_activate_atr_mult
         self.breakeven_buffer = breakeven_buffer
@@ -87,7 +89,9 @@ class StopTakeProfitPolicy:
                 stop_pct = min(self.max_stop_pct, sl_pct)
                 used_atr = True
             if tp_from_atr > 0:
-                tp_pct = min(self.max_tp_pct, tp_from_atr)
+                # Piso de TP: en acciones con ATR bajo, ATR×N puede quedar
+                # por debajo del coste de spread/comisión (~0.45%).
+                tp_pct = min(self.max_tp_pct, max(self.min_tp_pct, tp_from_atr))
                 used_atr = True
             trailing_offset = atr_value * self.atr_trailing_mult
 
