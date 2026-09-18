@@ -9,11 +9,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from bot.config import PROJECT_ROOT
-from bot.market.assets import asset_class_for
+from bot.market.assets import asset_class_for, normalize_symbol
 
 logger = logging.getLogger(__name__)
 
 POSITIONS_PATH = PROJECT_ROOT / "data" / "open_positions.json"
+
+
+def _book_key(symbol: str) -> str:
+    return normalize_symbol(symbol)
 
 
 @dataclass
@@ -66,8 +70,9 @@ class OpenPositionBook:
             for symbol, data in rows.items():
                 if not isinstance(data, dict):
                     continue
-                self._positions[str(symbol).upper()] = TrackedPosition(
-                    symbol=str(data.get("symbol", symbol)).upper(),
+                key = _book_key(str(data.get("symbol", symbol)))
+                self._positions[key] = TrackedPosition(
+                    symbol=key,
                     qty=float(data["qty"]),
                     avg_entry_price=float(data["avg_entry_price"]),
                     stop_price=float(data.get("stop_price", 0.0)),
@@ -75,7 +80,7 @@ class OpenPositionBook:
                     stop_pct=float(data.get("stop_pct", 0.0)),
                     take_profit_pct=float(data.get("take_profit_pct", 0.0)),
                     dry_run=bool(data.get("dry_run", True)),
-                    asset_class=str(data.get("asset_class", asset_class_for(str(symbol)))),
+                    asset_class=str(data.get("asset_class", asset_class_for(key))),
                     opened_at=str(data.get("opened_at", "")),
                     current_price=float(data.get("current_price", 0.0)),
                     trailing_notified=bool(data.get("trailing_notified", False)),
@@ -94,13 +99,13 @@ class OpenPositionBook:
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def get(self, symbol: str) -> TrackedPosition | None:
-        return self._positions.get(str(symbol).upper())
+        return self._positions.get(_book_key(symbol))
 
     def list(self) -> list[TrackedPosition]:
         return list(self._positions.values())
 
     def has(self, symbol: str) -> bool:
-        return str(symbol).upper() in self._positions
+        return _book_key(symbol) in self._positions
 
     def open(
         self,
@@ -114,7 +119,7 @@ class OpenPositionBook:
         take_profit_pct: float,
         dry_run: bool,
     ) -> TrackedPosition:
-        key = str(symbol).upper()
+        key = _book_key(symbol)
         pos = TrackedPosition(
             symbol=key,
             qty=float(qty),
@@ -155,7 +160,7 @@ class OpenPositionBook:
         self.save()
 
     def close(self, symbol: str) -> TrackedPosition | None:
-        key = str(symbol).upper()
+        key = _book_key(symbol)
         pos = self._positions.pop(key, None)
         if pos is not None:
             self.save()

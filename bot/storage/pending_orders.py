@@ -10,10 +10,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from bot.config import PROJECT_ROOT
+from bot.market.assets import normalize_symbol
 
 logger = logging.getLogger(__name__)
 
 PENDING_PATH = PROJECT_ROOT / "data" / "pending_orders.json"
+
+
+def _order_key(symbol: str) -> str:
+    return normalize_symbol(symbol)
 
 
 @dataclass
@@ -64,7 +69,7 @@ class PendingOrderBook:
                 order_id = str(data["order_id"])
                 loaded[order_id] = RestingOrder(
                     order_id=order_id,
-                    symbol=str(data.get("symbol", "")).upper(),
+                    symbol=_order_key(str(data.get("symbol", ""))),
                     side=str(data.get("side", "sell")).lower(),
                     qty=float(data.get("qty", 0.0) or 0.0),
                     reason=str(data.get("reason", "close")),
@@ -129,6 +134,7 @@ class PendingOrderBook:
 
     def upsert(self, order: RestingOrder) -> RestingOrder:
         with self._lock:
+            order.symbol = _order_key(order.symbol)
             current = self._orders.get(order.order_id)
             if current is not None:
                 if not order.reason or order.reason == "close":
@@ -151,23 +157,24 @@ class PendingOrderBook:
             return gone
 
     def has_close(self, symbol: str) -> bool:
-        key = str(symbol).upper()
+        key = _order_key(symbol)
         with self._lock:
             return any(
-                row.symbol == key and row.is_close for row in self._orders.values()
+                _order_key(row.symbol) == key and row.is_close for row in self._orders.values()
             )
 
     def has_open(self, symbol: str) -> bool:
-        key = str(symbol).upper()
+        key = _order_key(symbol)
         with self._lock:
             return any(
-                row.symbol == key and not row.is_close for row in self._orders.values()
+                _order_key(row.symbol) == key and not row.is_close
+                for row in self._orders.values()
             )
 
     def close_for(self, symbol: str) -> RestingOrder | None:
-        key = str(symbol).upper()
+        key = _order_key(symbol)
         with self._lock:
             for row in self._orders.values():
-                if row.symbol == key and row.is_close:
+                if _order_key(row.symbol) == key and row.is_close:
                     return row
         return None

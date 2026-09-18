@@ -101,6 +101,14 @@ class Settings:
     breakeven_buffer: float = 0.25
     breakeven_buffer_atr_mult: float = 0.35
     min_tp_pct: float = 0.015
+    # Cripto: SL más corto, TP ~5x ATR (>=3:1 vs SL 1.2), foco en el más fuerte
+    crypto_atr_sl_mult: float = 1.2
+    crypto_atr_tp_mult: float = 6.0
+    crypto_atr_trailing_mult: float = 3.5
+    crypto_min_tp_pct: float = 0.03
+    crypto_breakeven_activate_pct: float = 0.012
+    crypto_breakeven_activate_atr_mult: float = 2.5
+    crypto_trade_best_only: bool = True
     adx_period: int = 14
     adx_threshold: float = 20.0
     adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
@@ -401,6 +409,49 @@ def load_settings(env_path: Path | None = None) -> Settings:
             max_value=0.10,
             name="MIN_TP_PCT",
         ),
+        crypto_atr_sl_mult=bounded_float(
+            os.getenv("CRYPTO_ATR_SL_MULTIPLIER"),
+            1.2,
+            min_value=0.5,
+            max_value=8.0,
+            name="CRYPTO_ATR_SL_MULTIPLIER",
+        ),
+        crypto_atr_tp_mult=bounded_float(
+            os.getenv("CRYPTO_ATR_TP_MULTIPLIER"),
+            6.0,
+            min_value=0.5,
+            max_value=15.0,
+            name="CRYPTO_ATR_TP_MULTIPLIER",
+        ),
+        crypto_atr_trailing_mult=bounded_float(
+            os.getenv("CRYPTO_ATR_TRAILING_MULTIPLIER"),
+            3.5,
+            min_value=0.5,
+            max_value=10.0,
+            name="CRYPTO_ATR_TRAILING_MULTIPLIER",
+        ),
+        crypto_min_tp_pct=bounded_float(
+            os.getenv("CRYPTO_MIN_TP_PCT"),
+            0.03,
+            min_value=0.0,
+            max_value=0.20,
+            name="CRYPTO_MIN_TP_PCT",
+        ),
+        crypto_breakeven_activate_pct=bounded_float(
+            os.getenv("CRYPTO_BREAKEVEN_ACTIVATE_PCT"),
+            0.012,
+            min_value=0.0001,
+            max_value=0.08,
+            name="CRYPTO_BREAKEVEN_ACTIVATE_PCT",
+        ),
+        crypto_breakeven_activate_atr_mult=bounded_float(
+            os.getenv("CRYPTO_BREAKEVEN_ACTIVATE_ATR_MULT"),
+            2.5,
+            min_value=0.1,
+            max_value=6.0,
+            name="CRYPTO_BREAKEVEN_ACTIVATE_ATR_MULT",
+        ),
+        crypto_trade_best_only=_as_bool(os.getenv("CRYPTO_TRADE_BEST_ONLY"), default=True),
         adx_period=bounded_int(os.getenv("ADX_PERIOD"), 14, min_value=5, max_value=50, name="ADX_PERIOD"),
         adx_threshold=bounded_float(
             os.getenv("ADX_THRESHOLD"), 20.0, min_value=1.0, max_value=80.0, name="ADX_THRESHOLD"

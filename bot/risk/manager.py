@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from bot.alpaca.client import AccountSnapshot
 from bot.config import Settings
-from bot.market.assets import is_crypto_symbol
+from bot.market.assets import is_crypto_symbol, normalize_symbol
 from bot.market.dust import dust_threshold_for
 from bot.risk.stops import ExitReason, ProtectiveLevels, StopTakeProfitPolicy
 from bot.security.sanitize import floor_fractional_qty
@@ -48,24 +48,48 @@ class RiskManager:
         )
 
     def _stops_for(self, symbol: str | None) -> StopTakeProfitPolicy:
-        if not symbol:
-            return self.stops
-        params = self.overrides.get(symbol.upper())
-        if params is None:
-            return self.stops
-        return StopTakeProfitPolicy(
-            stop_loss_pct=params.stop_loss_pct,
-            take_profit_pct=params.take_profit_pct,
-            atr_stop_mult=params.atr_stop_mult,
-            atr_sl_mult=params.atr_stop_mult,
-            atr_tp_mult=self.settings.atr_tp_mult,
-            atr_trailing_mult=self.settings.atr_trailing_mult,
-            breakeven_activate_pct=self.settings.breakeven_activate_pct,
-            breakeven_activate_atr_mult=self.settings.breakeven_activate_atr_mult,
-            breakeven_buffer=self.settings.breakeven_buffer,
-            breakeven_buffer_atr_mult=self.settings.breakeven_buffer_atr_mult,
-            min_tp_pct=self.settings.min_tp_pct,
-        )
+        settings = self.settings
+        policy = self.stops
+        params = None
+        if symbol:
+            key = normalize_symbol(symbol)
+            compact = key.replace("/", "")
+            params = (
+                self.overrides.get(key.upper())
+                or self.overrides.get(symbol.upper())
+                or self.overrides.get(compact.upper())
+            )
+            if params is not None:
+                policy = StopTakeProfitPolicy(
+                    stop_loss_pct=params.stop_loss_pct,
+                    take_profit_pct=params.take_profit_pct,
+                    atr_stop_mult=params.atr_stop_mult,
+                    atr_sl_mult=params.atr_stop_mult,
+                    atr_tp_mult=settings.atr_tp_mult,
+                    atr_trailing_mult=settings.atr_trailing_mult,
+                    breakeven_activate_pct=settings.breakeven_activate_pct,
+                    breakeven_activate_atr_mult=settings.breakeven_activate_atr_mult,
+                    breakeven_buffer=settings.breakeven_buffer,
+                    breakeven_buffer_atr_mult=settings.breakeven_buffer_atr_mult,
+                    min_tp_pct=settings.min_tp_pct,
+                )
+            if is_crypto_symbol(symbol):
+                return StopTakeProfitPolicy(
+                    stop_loss_pct=policy.stop_loss_pct,
+                    take_profit_pct=policy.take_profit_pct,
+                    atr_stop_mult=policy.atr_stop_mult,
+                    atr_sl_mult=(
+                        params.atr_stop_mult if params is not None else settings.crypto_atr_sl_mult
+                    ),
+                    atr_tp_mult=settings.crypto_atr_tp_mult,
+                    atr_trailing_mult=settings.crypto_atr_trailing_mult,
+                    breakeven_activate_pct=settings.crypto_breakeven_activate_pct,
+                    breakeven_activate_atr_mult=settings.crypto_breakeven_activate_atr_mult,
+                    breakeven_buffer=settings.breakeven_buffer,
+                    breakeven_buffer_atr_mult=settings.breakeven_buffer_atr_mult,
+                    min_tp_pct=settings.crypto_min_tp_pct,
+                )
+        return policy
 
     def evaluate(
         self,
@@ -117,13 +141,17 @@ class RiskManager:
         if cap_notional <= 0:
             return RiskDecision(False, 0.0, "buying power insuficiente")
 
+        effective_sl = atr_sl_mult
+        if effective_sl is None and is_crypto_symbol(symbol):
+            effective_sl = self.settings.crypto_atr_sl_mult
+
         if self.settings.use_fixed_risk_sizing:
             qty = self._qty_from_risk(
-                symbol, last_price, account.equity, atr_value, atr_sl_mult, cap_notional
+                symbol, last_price, account.equity, atr_value, effective_sl, cap_notional
             )
             if qty <= 0:
                 return RiskDecision(False, 0.0, "riesgo fijo no alcanza cantidad mínima")
-            sl_dist = self._stop_distance(last_price, atr_value, atr_sl_mult)
+            sl_dist = self._stop_distance(symbol, last_price, atr_value, effective_sl)
             logger.info(
                 "Riesgo OK | %s BUY qty=%s notional~%.2f | riesgo fijo %.2f%% equity "
                 "| SL dist=%.4f",
@@ -153,14 +181,21 @@ class RiskManager:
 
     def _stop_distance(
         self,
+        symbol: str,
         last_price: float,
         atr_value: float | None,
         atr_sl_mult: float | None,
     ) -> float:
-        sl_mult = float(atr_sl_mult if atr_sl_mult is not None else self.settings.atr_sl_mult)
+        if atr_sl_mult is not None:
+            sl_mult = float(atr_sl_mult)
+        elif is_crypto_symbol(symbol):
+            sl_mult = float(self.settings.crypto_atr_sl_mult)
+        else:
+            sl_mult = float(self.settings.atr_sl_mult)
         if atr_value and atr_value > 0:
             return float(atr_value) * sl_mult
-        return last_price * self.settings.stop_loss_pct
+        policy = self._stops_for(symbol)
+        return last_price * policy.stop_loss_pct
 
     def _qty_from_risk(
         self,
@@ -171,7 +206,7 @@ class RiskManager:
         atr_sl_mult: float | None,
         cap_notional: float,
     ) -> float:
-        sl_dist = self._stop_distance(last_price, atr_value, atr_sl_mult)
+        sl_dist = self._stop_distance(symbol, last_price, atr_value, atr_sl_mult)
         if sl_dist <= 0 or last_price <= 0:
             return 0.0
         risk_cash = equity * self.settings.risk_percent_per_trade

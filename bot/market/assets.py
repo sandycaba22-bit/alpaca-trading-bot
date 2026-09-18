@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Iterable
+
 from bot.config import Settings
 
 
@@ -25,14 +27,25 @@ def is_stock_symbol(symbol: str) -> bool:
     return not is_crypto_symbol(symbol)
 
 
+def positions_by_symbol(positions: Iterable[Any]) -> dict[str, Any]:
+    """Indexa posiciones del broker por símbolo canónico (BTC/USD, no BTCUSD)."""
+    out: dict[str, Any] = {}
+    for pos in positions:
+        key = normalize_symbol(str(getattr(pos, "symbol", "") or ""))
+        if not key:
+            continue
+        out[key] = pos
+    return out
+
+
 def all_symbols(settings: Settings) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
     for sym in list(settings.stock_symbols) + list(settings.crypto_symbols):
-        key = sym.upper()
+        key = normalize_symbol(sym)
         if key not in seen:
             seen.add(key)
-            ordered.append(sym)
+            ordered.append(key if is_crypto_symbol(sym) else sym.upper())
     return ordered
 
 

@@ -22,7 +22,7 @@ from bot.alpaca.execution import (
 from bot.alpaca.market_data import LiveTape, MarketDataService
 from bot.alpaca.stream import LiveMarketStream
 from bot.config import Settings
-from bot.market.assets import asset_class_for, is_crypto_symbol, normalize_symbol
+from bot.market.assets import asset_class_for, is_crypto_symbol, normalize_symbol, positions_by_symbol
 from bot.market.dust import dust_threshold_for, effective_qty, is_dust_qty, refresh_crypto_mins
 from bot.market.mode import is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.notify.telegram import TelegramNotifier, make_event_id
@@ -1286,7 +1286,7 @@ class TradingEngine:
     def _mark_all_positions(self) -> None:
         """Monitorea SL/TP de todas las posiciones abiertas (libro local o broker)."""
         clock = self.client.get_market_clock()
-        positions = {pos.symbol: pos for pos in self.executor.list_positions()}
+        positions = positions_by_symbol(self.executor.list_positions())
         for symbol in list(positions):
             if self.control.is_paused():
                 return
@@ -1298,7 +1298,7 @@ class TradingEngine:
                 log_caught(logger, "mark_to_market_failed", exc, symbol=symbol)
 
     def _mark_to_market(self, symbol: str, positions: dict, clock: MarketClockView) -> None:
-        position = positions.get(symbol)
+        position = positions.get(normalize_symbol(symbol)) or positions.get(symbol)
         if position is None:
             return
 
@@ -1432,6 +1432,21 @@ class TradingEngine:
                 symbol=symbol,
                 atr_sl_mult=atr_sl_mult,
             )
+            sl_mult_log = (
+                self.settings.crypto_atr_sl_mult
+                if is_crypto_symbol(symbol)
+                else self.settings.atr_sl_mult
+            )
+            tp_mult_log = (
+                self.settings.crypto_atr_tp_mult
+                if is_crypto_symbol(symbol)
+                else self.settings.atr_tp_mult
+            )
+            trail_mult_log = (
+                self.settings.crypto_atr_trailing_mult
+                if is_crypto_symbol(symbol)
+                else self.settings.atr_trailing_mult
+            )
             logger.info(
                 "%s | ATR=%s (period=%s) fuente=%s | SL=%.4f (%.2f%%, %.2fx) | "
                 "TP=%.4f (%.2f%%, %.2fx) | trailing=%s (%.2fx)",
@@ -1441,12 +1456,12 @@ class TradingEngine:
                 "atr" if levels.used_atr else "pct_fallback",
                 levels.stop_price,
                 levels.stop_pct * 100,
-                self.settings.atr_sl_mult,
+                atr_sl_mult if atr_sl_mult is not None else sl_mult_log,
                 levels.take_profit_price,
                 levels.take_profit_pct * 100,
-                self.settings.atr_tp_mult,
+                tp_mult_log,
                 f"{levels.trailing_offset:.4f}" if levels.trailing_offset else "pct_fallback",
-                self.settings.atr_trailing_mult,
+                trail_mult_log,
             )
             audit("signal_buy", "allow", symbol=symbol, qty=decision.qty)
             buy_event_id = self._event_id(symbol, "open", "signal_6m")

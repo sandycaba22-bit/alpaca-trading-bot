@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from bot.config import PROJECT_ROOT
-from bot.market.assets import all_symbols, is_crypto_symbol
+from bot.market.assets import all_symbols, is_crypto_symbol, normalize_symbol, positions_by_symbol
 from bot.market.mode import TradingMode, is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.security.exceptions import RateLimitError
 from bot.strategy.base import Signal
@@ -290,7 +290,7 @@ class MultiTimeframeEngine:
                 "Capa 6m sin snapshot de cuenta — se mantienen mark-to-market y cierres, "
                 "pero las nuevas compras quedan bloqueadas hasta recuperar cuenta o cache"
             )
-        positions = {pos.symbol: pos for pos in engine.executor.list_positions()}
+        positions = positions_by_symbol(engine.executor.list_positions())
 
         mark_symbols = list(dict.fromkeys([*positions, *self.active_symbols]))
         for index, symbol in enumerate(mark_symbols):
@@ -304,26 +304,69 @@ class MultiTimeframeEngine:
                 pass
             self._sleep_between_crypto_symbols(mark_symbols, index)
 
-        positions = {pos.symbol: pos for pos in engine.executor.list_positions()}
+        positions = positions_by_symbol(engine.executor.list_positions())
         active_symbols = list(self.active_symbols)
+        best_crypto = self._pick_best_crypto(active_symbols) if self._crypto_best_only() else None
+        if best_crypto:
+            logger.info(
+                "Cripto foco | mejor momentum=%s | candidatos=%s",
+                best_crypto,
+                ",".join(active_symbols),
+            )
         for index, symbol in enumerate(active_symbols):
             if engine.control.is_paused():
                 return
             if not is_symbol_tradable(symbol, clock):
                 continue
             try:
-                self._process_6m_symbol(symbol, account, positions)
+                self._process_6m_symbol(
+                    symbol,
+                    account,
+                    positions,
+                    focus_crypto=best_crypto,
+                )
             except RateLimitError as exc:
                 logger.warning("%s | capa 6m rate limit — se continúa con el resto | %s", symbol, exc)
             except Exception as exc:
                 logger.warning("%s | capa 6m fallo: %s", symbol, exc)
             self._sleep_between_crypto_symbols(active_symbols, index)
 
+    def _crypto_best_only(self) -> bool:
+        return (
+            self.trading_mode is TradingMode.CRYPTO
+            and bool(getattr(self.engine.settings, "crypto_trade_best_only", True))
+        )
+
+    def _pick_best_crypto(self, symbols: list[str]) -> str | None:
+        """Elige el cripto con mejor tendencia/retorno HTF (bull > sideways > bear)."""
+        cryptos = [s for s in symbols if is_crypto_symbol(s)]
+        if not cryptos:
+            return None
+        best: str | None = None
+        best_score = float("-inf")
+        for symbol in cryptos:
+            entry = self.cache.get(symbol) or SymbolLayerCache()
+            score = 0.0
+            trend = (entry.trend or "").lower()
+            if trend == "bull":
+                score += 50.0
+            elif trend == "sideways":
+                score += 10.0
+            elif trend == "bear":
+                score -= 40.0
+            score += float(entry.trend_return_pct or 0.0) * 10.0
+            score += float(entry.structure_return_pct or 0.0) * 5.0
+            if score > best_score:
+                best_score = score
+                best = symbol
+        return best
+
     def _process_6m_symbol(
         self,
         symbol: str,
         account,
         positions: dict,
+        focus_crypto: str | None = None,
     ) -> None:
         engine = self.engine
         cache = self.cache[symbol]
@@ -337,7 +380,7 @@ class MultiTimeframeEngine:
         )
         last_price = tape.last_price if tape else float(bars["close"].iloc[-1])
         last_price = engine.latest_price(symbol, last_price)
-        position = positions.get(symbol)
+        position = positions.get(normalize_symbol(symbol)) or positions.get(symbol)
         has_long = position is not None and float(position.qty) > 0
 
         signal, detail = analyze_signal(
@@ -376,6 +419,20 @@ class MultiTimeframeEngine:
             return
         if cache.trend == "bull" and signal is Signal.SELL and not has_long:
             logger.info("%s | SELL bloqueado — tendencia %s alcista", symbol, self._regime_timeframe(symbol))
+            return
+
+        if (
+            signal is Signal.BUY
+            and focus_crypto
+            and is_crypto_symbol(symbol)
+            and normalize_symbol(symbol) != normalize_symbol(focus_crypto)
+            and not has_long
+        ):
+            logger.info(
+                "%s | BUY omitido — foco cripto en %s (mejor momentum)",
+                symbol,
+                focus_crypto,
+            )
             return
 
         if signal is Signal.HOLD:
