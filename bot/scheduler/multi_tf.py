@@ -306,11 +306,13 @@ class MultiTimeframeEngine:
 
         positions = positions_by_symbol(engine.executor.list_positions())
         active_symbols = list(self.active_symbols)
-        best_crypto = self._pick_best_crypto(active_symbols) if self._crypto_best_only() else None
-        if best_crypto:
+        focus_symbol = self._pick_focus_symbol(active_symbols)
+        if focus_symbol:
+            label = "Cripto" if self.trading_mode is TradingMode.CRYPTO else "Acciones"
             logger.info(
-                "Cripto foco | mejor momentum=%s | candidatos=%s",
-                best_crypto,
+                "%s foco | mejor momentum=%s | candidatos=%s",
+                label,
+                focus_symbol,
                 ",".join(active_symbols),
             )
         for index, symbol in enumerate(active_symbols):
@@ -323,7 +325,7 @@ class MultiTimeframeEngine:
                     symbol,
                     account,
                     positions,
-                    focus_crypto=best_crypto,
+                    focus_symbol=focus_symbol,
                 )
             except RateLimitError as exc:
                 logger.warning("%s | capa 6m rate limit — se continúa con el resto | %s", symbol, exc)
@@ -331,20 +333,27 @@ class MultiTimeframeEngine:
                 logger.warning("%s | capa 6m fallo: %s", symbol, exc)
             self._sleep_between_crypto_symbols(active_symbols, index)
 
-    def _crypto_best_only(self) -> bool:
-        return (
-            self.trading_mode is TradingMode.CRYPTO
-            and bool(getattr(self.engine.settings, "crypto_trade_best_only", True))
-        )
+    def _focus_best_only_enabled(self) -> bool:
+        settings = self.engine.settings
+        if self.trading_mode is TradingMode.CRYPTO:
+            return bool(getattr(settings, "crypto_trade_best_only", True))
+        if self.trading_mode is TradingMode.STOCKS:
+            return bool(getattr(settings, "stock_trade_best_only", True))
+        return False
 
-    def _pick_best_crypto(self, symbols: list[str]) -> str | None:
-        """Elige el cripto con mejor tendencia/retorno HTF (bull > sideways > bear)."""
-        cryptos = [s for s in symbols if is_crypto_symbol(s)]
-        if not cryptos:
+    def _pick_focus_symbol(self, symbols: list[str]) -> str | None:
+        """Elige el activo con mejor tendencia/retorno HTF (bull > sideways > bear)."""
+        if not self._focus_best_only_enabled() or not symbols:
+            return None
+        if self.trading_mode is TradingMode.CRYPTO:
+            candidates = [s for s in symbols if is_crypto_symbol(s)]
+        else:
+            candidates = [s for s in symbols if not is_crypto_symbol(s)]
+        if not candidates:
             return None
         best: str | None = None
         best_score = float("-inf")
-        for symbol in cryptos:
+        for symbol in candidates:
             entry = self.cache.get(symbol) or SymbolLayerCache()
             score = 0.0
             trend = (entry.trend or "").lower()
@@ -366,7 +375,7 @@ class MultiTimeframeEngine:
         symbol: str,
         account,
         positions: dict,
-        focus_crypto: str | None = None,
+        focus_symbol: str | None = None,
     ) -> None:
         engine = self.engine
         cache = self.cache[symbol]
@@ -423,15 +432,14 @@ class MultiTimeframeEngine:
 
         if (
             signal is Signal.BUY
-            and focus_crypto
-            and is_crypto_symbol(symbol)
-            and normalize_symbol(symbol) != normalize_symbol(focus_crypto)
+            and focus_symbol
+            and normalize_symbol(symbol) != normalize_symbol(focus_symbol)
             and not has_long
         ):
             logger.info(
-                "%s | BUY omitido — foco cripto en %s (mejor momentum)",
+                "%s | BUY omitido — foco en %s (mejor momentum)",
                 symbol,
-                focus_crypto,
+                focus_symbol,
             )
             return
 

@@ -109,6 +109,8 @@ class Settings:
     crypto_breakeven_activate_pct: float = 0.012
     crypto_breakeven_activate_atr_mult: float = 2.5
     crypto_trade_best_only: bool = True
+    # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
+    stock_trade_best_only: bool = True
     adx_period: int = 14
     adx_threshold: float = 20.0
     adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
@@ -452,6 +454,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
             name="CRYPTO_BREAKEVEN_ACTIVATE_ATR_MULT",
         ),
         crypto_trade_best_only=_as_bool(os.getenv("CRYPTO_TRADE_BEST_ONLY"), default=True),
+        stock_trade_best_only=_as_bool(os.getenv("STOCK_TRADE_BEST_ONLY"), default=True),
         adx_period=bounded_int(os.getenv("ADX_PERIOD"), 14, min_value=5, max_value=50, name="ADX_PERIOD"),
         adx_threshold=bounded_float(
             os.getenv("ADX_THRESHOLD"), 20.0, min_value=1.0, max_value=80.0, name="ADX_THRESHOLD"
