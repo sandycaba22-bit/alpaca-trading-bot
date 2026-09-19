@@ -10,11 +10,14 @@ import argparse
 import sys
 from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parent.parent
+_SCRIPTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(_ROOT))
+sys.path.insert(0, str(_SCRIPTS))
+
 from bot.alpaca.client import AlpacaClient
 from bot.alpaca.market_data import MarketDataService
 from bot.config import PROJECT_ROOT, load_settings
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _tp_cost_ratio_lib import (  # noqa: E402
     CSV_HEADER,
