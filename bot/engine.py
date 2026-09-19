@@ -253,6 +253,16 @@ class TradingEngine:
             self.settings.crypto_trend_pullback_rsi_max,
         )
         logger.info(
+            "Trailing 2 etapas | BE max(%.2f%%, %.1fx ATR) buffer=%.2fx ATR | "
+            "chase=%.1fx ATR tras BE | cripto BE max(%.2f%%, %.1fx ATR)",
+            self.settings.breakeven_activate_pct * 100,
+            self.settings.breakeven_activate_atr_mult,
+            self.settings.breakeven_buffer_atr_mult,
+            self.settings.atr_trailing_mult,
+            self.settings.crypto_breakeven_activate_pct * 100,
+            self.settings.crypto_breakeven_activate_atr_mult,
+        )
+        logger.info(
             "Score entrada | %s min=%.0f | colision=%s | macro -%.0f | spike -%.0f/+%.0f",
             "on" if self.settings.entry_score_enabled else "off",
             self.settings.entry_score_min,
@@ -1262,21 +1272,24 @@ class TradingEngine:
         use_book_tp = not self.settings.dynamic_tp_enabled
         reason = ExitReason.NONE
         if stored_sl > 0 or (use_book_tp and stored_tp > 0):
-            if stored_sl > 0 and last_price <= stored_sl:
+            tp_touch = use_book_tp and stored_tp > 0 and peak_price >= stored_tp
+            sl_touch = stored_sl > 0 and last_price <= stored_sl
+            if tp_touch:
+                reason = ExitReason.TAKE_PROFIT
+                logger.info(
+                    "Salida take_profit | %s peak=%.4f last=%.4f TP=%.4f (libro)",
+                    symbol,
+                    peak_price,
+                    last_price,
+                    stored_tp,
+                )
+            elif sl_touch:
                 reason = ExitReason.STOP_LOSS
                 logger.info(
                     "Salida stop_loss | %s last=%.4f SL=%.4f (libro)",
                     symbol,
                     last_price,
                     stored_sl,
-                )
-            elif use_book_tp and stored_tp > 0 and last_price >= stored_tp:
-                reason = ExitReason.TAKE_PROFIT
-                logger.info(
-                    "Salida take_profit | %s last=%.4f TP=%.4f (libro)",
-                    symbol,
-                    last_price,
-                    stored_tp,
                 )
         else:
             reason = self.risk.evaluate_exit(entry, qty, last_price, atr_value, symbol=symbol)

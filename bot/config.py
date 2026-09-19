@@ -95,19 +95,19 @@ class Settings:
     log_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "logs")
     atr_sl_mult: float = 1.5
     atr_tp_mult: float = 5.5
-    atr_trailing_mult: float = 3.0
-    breakeven_activate_pct: float = 0.006
-    breakeven_activate_atr_mult: float = 2.5
-    breakeven_buffer: float = 0.25
-    breakeven_buffer_atr_mult: float = 0.35
+    atr_trailing_mult: float = 2.0
+    breakeven_activate_pct: float = 0.0015
+    breakeven_activate_atr_mult: float = 0.5
+    breakeven_buffer: float = 0.0
+    breakeven_buffer_atr_mult: float = 0.20
     min_tp_pct: float = 0.015
     # Cripto: SL más corto, TP ~5x ATR (>=3:1 vs SL 1.2), foco en el más fuerte
     crypto_atr_sl_mult: float = 1.2
     crypto_atr_tp_mult: float = 6.0
-    crypto_atr_trailing_mult: float = 3.5
+    crypto_atr_trailing_mult: float = 2.0
     crypto_min_tp_pct: float = 0.03
-    crypto_breakeven_activate_pct: float = 0.012
-    crypto_breakeven_activate_atr_mult: float = 2.5
+    crypto_breakeven_activate_pct: float = 0.0015
+    crypto_breakeven_activate_atr_mult: float = 0.5
     crypto_trade_best_only: bool = True
     crypto_trend_pullback_rsi_max: float = 78.0
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
@@ -380,35 +380,35 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         atr_trailing_mult=bounded_float(
             os.getenv("ATR_TRAILING_MULTIPLIER"),
-            3.0,
+            2.0,
             min_value=0.5,
             max_value=8.0,
             name="ATR_TRAILING_MULTIPLIER",
         ),
         breakeven_activate_pct=bounded_float(
             os.getenv("BREAKEVEN_ACTIVATE_PCT"),
-            0.006,
+            0.0015,
             min_value=0.0001,
             max_value=0.05,
             name="BREAKEVEN_ACTIVATE_PCT",
         ),
         breakeven_activate_atr_mult=bounded_float(
             os.getenv("BREAKEVEN_ACTIVATE_ATR_MULT"),
-            2.5,
+            0.5,
             min_value=0.1,
             max_value=5.0,
             name="BREAKEVEN_ACTIVATE_ATR_MULT",
         ),
         breakeven_buffer=bounded_float(
             os.getenv("BREAKEVEN_BUFFER"),
-            0.25,
+            0.0,
             min_value=0.0,
             max_value=50.0,
             name="BREAKEVEN_BUFFER",
         ),
         breakeven_buffer_atr_mult=bounded_float(
             os.getenv("BREAKEVEN_BUFFER_ATR_MULT"),
-            0.35,
+            0.20,
             min_value=0.01,
             max_value=1.0,
             name="BREAKEVEN_BUFFER_ATR_MULT",
@@ -436,7 +436,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         crypto_atr_trailing_mult=bounded_float(
             os.getenv("CRYPTO_ATR_TRAILING_MULTIPLIER"),
-            3.5,
+            2.0,
             min_value=0.5,
             max_value=10.0,
             name="CRYPTO_ATR_TRAILING_MULTIPLIER",
@@ -450,14 +450,14 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         crypto_breakeven_activate_pct=bounded_float(
             os.getenv("CRYPTO_BREAKEVEN_ACTIVATE_PCT"),
-            0.012,
+            0.0015,
             min_value=0.0001,
             max_value=0.08,
             name="CRYPTO_BREAKEVEN_ACTIVATE_PCT",
         ),
         crypto_breakeven_activate_atr_mult=bounded_float(
             os.getenv("CRYPTO_BREAKEVEN_ACTIVATE_ATR_MULT"),
-            2.5,
+            0.5,
             min_value=0.1,
             max_value=6.0,
             name="CRYPTO_BREAKEVEN_ACTIVATE_ATR_MULT",

@@ -118,6 +118,27 @@ class StopTakeProfitPolicy:
             trailing_offset=trailing_offset,
         )
 
+    def _stage_a_active(
+        self,
+        entry_price: float,
+        qty: float,
+        peak_price: float,
+        atr_value: float | None,
+    ) -> bool:
+        """Etapa A: peak superó max(piso %, mult×ATR) desde la entrada."""
+        if not self.use_breakeven_lock or not atr_value or atr_value <= 0:
+            return False
+        activate_dist = max(
+            entry_price * float(self.breakeven_activate_pct),
+            float(atr_value) * float(self.breakeven_activate_atr_mult),
+        )
+        if activate_dist <= 0:
+            return False
+        long = qty >= 0
+        if long:
+            return peak_price >= entry_price + activate_dist
+        return peak_price <= entry_price - activate_dist
+
     def trailing_candidate(
         self,
         entry_price: float,
@@ -129,52 +150,42 @@ class StopTakeProfitPolicy:
         activate_pct: float = 0.025,
         offset_pct: float = 0.0125,
     ) -> tuple[float | None, str]:
-        """Nuevo SL de trailing (piso A breakeven + piso B chase ATR), o None si no sube."""
+        """Trailing 2 etapas: A) candado BE+buffer ATR; B) chase ATR solo tras A."""
         if qty <= 0 or entry_price <= 0 or peak_price <= 0:
             return None, "invalid"
         long = qty >= 0
+        stage_a = self._stage_a_active(entry_price, qty, peak_price, atr_value)
         floor_a: float | None = None
         floor_b: float | None = None
         source_b = "pct"
 
-        if (
-            self.use_breakeven_lock
-            and atr_value
-            and atr_value > 0
-            and self.breakeven_activate_atr_mult > 0
-        ):
-            # En acciones con ATR chico, el múltiplo solo se activa demasiado pronto.
-            activate_dist = max(
-                float(atr_value) * float(self.breakeven_activate_atr_mult),
-                entry_price * float(self.breakeven_activate_pct),
+        if stage_a and atr_value and atr_value > 0:
+            buffer = max(
+                float(self.breakeven_buffer),
+                float(atr_value) * float(self.breakeven_buffer_atr_mult),
             )
-            buffer = max(0.0, float(atr_value) * float(self.breakeven_buffer_atr_mult))
-            if long and peak_price >= entry_price + activate_dist:
+            if long:
                 floor_a = entry_price + buffer
-            elif (not long) and peak_price <= entry_price - activate_dist:
+            else:
                 floor_a = entry_price - buffer
 
-        if atr_value and atr_value > 0:
-            offset = atr_value * self.atr_trailing_mult
-            # Chase ATR solo tras un recorrido mínimo (% o offset), para no cortar runners.
-            trail_gate = max(offset, entry_price * max(float(self.breakeven_activate_pct), 0.01))
-            if offset <= 0:
-                if floor_a is None:
-                    return None, "atr_zero"
-            elif long and peak_price >= entry_price + trail_gate:
-                floor_b = peak_price - offset
-                source_b = "atr"
-            elif (not long) and peak_price <= entry_price - trail_gate:
-                floor_b = peak_price + offset
-                source_b = "atr"
-        else:
-            pnl_pct = peak_price / entry_price - 1.0
-            if long and pnl_pct >= activate_pct:
-                floor_b = peak_price * (1.0 - offset_pct)
-                source_b = "pct"
-            elif (not long) and pnl_pct <= -activate_pct:
-                floor_b = peak_price * (1.0 + offset_pct)
-                source_b = "pct"
+        if stage_a:
+            if atr_value and atr_value > 0:
+                offset = float(atr_value) * float(self.atr_trailing_mult)
+                if offset > 0:
+                    if long:
+                        floor_b = peak_price - offset
+                    else:
+                        floor_b = peak_price + offset
+                    source_b = "atr"
+            else:
+                pnl_pct = peak_price / entry_price - 1.0
+                if long and pnl_pct >= activate_pct:
+                    floor_b = peak_price * (1.0 - offset_pct)
+                    source_b = "pct"
+                elif (not long) and pnl_pct <= -activate_pct:
+                    floor_b = peak_price * (1.0 + offset_pct)
+                    source_b = "pct"
 
         floors = [value for value in (floor_a, floor_b) if value is not None]
         if not floors:
@@ -212,15 +223,15 @@ class StopTakeProfitPolicy:
         levels = self.levels(entry_price, qty, last_price, atr_value)
         long = qty >= 0
         if long:
-            if last_price <= levels.stop_price:
-                return ExitReason.STOP_LOSS
             if last_price >= levels.take_profit_price:
                 return ExitReason.TAKE_PROFIT
-        else:
-            if last_price >= levels.stop_price:
+            if last_price <= levels.stop_price:
                 return ExitReason.STOP_LOSS
+        else:
             if last_price <= levels.take_profit_price:
                 return ExitReason.TAKE_PROFIT
+            if last_price >= levels.stop_price:
+                return ExitReason.STOP_LOSS
         return ExitReason.NONE
 
     def evaluate_bar(
@@ -239,13 +250,13 @@ class StopTakeProfitPolicy:
         levels = self.levels(entry_price, qty, close, atr_value)
         long = qty >= 0
         if long:
-            if low <= levels.stop_price:
-                return ExitReason.STOP_LOSS, levels.stop_price
             if high >= levels.take_profit_price:
                 return ExitReason.TAKE_PROFIT, levels.take_profit_price
-        else:
-            if high >= levels.stop_price:
+            if low <= levels.stop_price:
                 return ExitReason.STOP_LOSS, levels.stop_price
+        else:
             if low <= levels.take_profit_price:
                 return ExitReason.TAKE_PROFIT, levels.take_profit_price
+            if high >= levels.stop_price:
+                return ExitReason.STOP_LOSS, levels.stop_price
         return ExitReason.NONE, close
