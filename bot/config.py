@@ -109,8 +109,11 @@ class Settings:
     crypto_breakeven_activate_pct: float = 0.012
     crypto_breakeven_activate_atr_mult: float = 2.5
     crypto_trade_best_only: bool = True
+    crypto_trend_pullback_rsi_max: float = 78.0
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
     stock_trade_best_only: bool = True
+    stock_atr_sl_mult: float = 2.0
+    stock_min_stop_pct: float = 0.0035
     adx_period: int = 14
     adx_threshold: float = 20.0
     adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
@@ -454,7 +457,28 @@ def load_settings(env_path: Path | None = None) -> Settings:
             name="CRYPTO_BREAKEVEN_ACTIVATE_ATR_MULT",
         ),
         crypto_trade_best_only=_as_bool(os.getenv("CRYPTO_TRADE_BEST_ONLY"), default=True),
+        crypto_trend_pullback_rsi_max=bounded_float(
+            os.getenv("CRYPTO_TREND_PULLBACK_RSI_MAX"),
+            78.0,
+            min_value=55.0,
+            max_value=90.0,
+            name="CRYPTO_TREND_PULLBACK_RSI_MAX",
+        ),
         stock_trade_best_only=_as_bool(os.getenv("STOCK_TRADE_BEST_ONLY"), default=True),
+        stock_atr_sl_mult=bounded_float(
+            os.getenv("STOCK_ATR_SL_MULTIPLIER"),
+            2.0,
+            min_value=0.5,
+            max_value=8.0,
+            name="STOCK_ATR_SL_MULTIPLIER",
+        ),
+        stock_min_stop_pct=bounded_float(
+            os.getenv("STOCK_MIN_STOP_PCT"),
+            0.0035,
+            min_value=0.0,
+            max_value=0.02,
+            name="STOCK_MIN_STOP_PCT",
+        ),
         adx_period=bounded_int(os.getenv("ADX_PERIOD"), 14, min_value=5, max_value=50, name="ADX_PERIOD"),
         adx_threshold=bounded_float(
             os.getenv("ADX_THRESHOLD"), 20.0, min_value=1.0, max_value=80.0, name="ADX_THRESHOLD"

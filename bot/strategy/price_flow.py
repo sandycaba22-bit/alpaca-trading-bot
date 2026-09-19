@@ -5,8 +5,16 @@ from __future__ import annotations
 import logging
 
 from bot.strategy.base import Signal, StrategyContext
+from bot.strategy.regime_selector import StrategyId
 
 logger = logging.getLogger(__name__)
+
+_PULLBACK_FLOW = frozenset(
+    {
+        StrategyId.PULLBACK.value,
+        StrategyId.TREND_PULLBACK.value,
+    }
+)
 
 
 class PriceFlowFilter:
@@ -97,6 +105,10 @@ class PriceFlowFilter:
             return True, "impulso bajista reciente"
         return False, f"sin quiebre ágil (zona>{support * (1.0 + zone_pct):.4f})"
 
+    def _is_pullback_entry(self, ctx: StrategyContext) -> bool:
+        key = str(ctx.entry_strategy or "").strip().lower()
+        return key in _PULLBACK_FLOW
+
     def confirm(self, signal: Signal, ctx: StrategyContext) -> tuple[bool, str]:
         if signal is Signal.HOLD:
             return False, "hold"
@@ -107,8 +119,9 @@ class PriceFlowFilter:
         last_close = float(ctx.bars["close"].iloc[-1])
         vs_close = (ctx.last_price - last_close) / last_close if last_close else 0.0
         zone_pct = self._zone_buffer_pct(ctx)
+        pullback_entry = self._is_pullback_entry(ctx)
         trigger_ready, trigger_reason = self._trigger_ready(signal, ctx, zone_pct)
-        spread_limit = self.max_spread_pct * (2.0 if trigger_ready else 1.0)
+        spread_limit = self.max_spread_pct * (2.0 if trigger_ready or pullback_entry else 1.0)
 
         if ctx.spread_pct is not None and ctx.spread_pct > spread_limit:
             return False, (
@@ -116,6 +129,27 @@ class PriceFlowFilter:
             )
 
         if signal is Signal.BUY:
+            if pullback_entry:
+                if vs_close <= -(self.max_adverse_vs_close_pct + zone_pct):
+                    return False, (
+                        f"flujo bajista vs cierre ({vs_close:.2%}); "
+                        "pullback no compra contra el tape"
+                    )
+                if (
+                    ctx.momentum_pct is not None
+                    and ctx.momentum_pct <= -(self.adverse_momentum_pct + zone_pct)
+                ):
+                    return False, f"momentum corto plazo {ctx.momentum_pct:.2%} adverso"
+                logger.info(
+                    "%s | flujo OK | motivo=pullback sin exigir ruptura | last=%.4f close=%.4f "
+                    "vs_close=%+.2f%% spread=%s",
+                    ctx.symbol,
+                    ctx.last_price,
+                    last_close,
+                    vs_close * 100,
+                    f"{ctx.spread_pct:.4%}" if ctx.spread_pct is not None else "n/a",
+                )
+                return True, "pullback — flujo sin exigir ruptura"
             if not trigger_ready:
                 return False, trigger_reason
             if vs_close <= -(self.max_adverse_vs_close_pct + zone_pct):

@@ -13,6 +13,7 @@ import logging
 import pandas as pd
 
 from bot.config import Settings
+from bot.market.assets import is_crypto_symbol
 from bot.strategy.base import Signal
 from bot.strategy.indicators import bollinger, ema, last_rsi, sma
 from bot.strategy.mean_reversion import mean_reversion_criteria
@@ -30,9 +31,15 @@ def resolve_htf_trend(bars: pd.DataFrame, htf_trend: str | None) -> str:
     return trend
 
 
-def _last_rsi_ok(rsi_value: float, settings: Settings) -> tuple[bool, float, float]:
+def _last_rsi_ok(
+    rsi_value: float,
+    settings: Settings,
+    symbol: str | None = None,
+) -> tuple[bool, float, float]:
     rsi_min = float(settings.trend_pullback_rsi_min)
     rsi_max = float(settings.trend_pullback_rsi_max)
+    if symbol and is_crypto_symbol(symbol):
+        rsi_max = max(rsi_max, float(settings.crypto_trend_pullback_rsi_max))
     if rsi_max < rsi_min:
         rsi_min, rsi_max = rsi_max, rsi_min
     return rsi_min <= rsi_value <= rsi_max, rsi_min, rsi_max
@@ -55,6 +62,7 @@ def _continuation_dip(
     *,
     settings: Settings,
     sma_px: float | None,
+    symbol: str = "",
 ) -> tuple[Signal, str]:
     if bars is None or bars.empty or "close" not in bars.columns:
         return Signal.HOLD, "trend-pullback sin barras"
@@ -79,7 +87,7 @@ def _continuation_dip(
     ema_px = float(fast.iloc[-1])
     mid_px = float(mid.iloc[-1])
     near = max(0.0, float(settings.pullback_ema_near_pct)) * ema_px
-    rsi_ok, rsi_min, rsi_max = _last_rsi_ok(rsi_value, settings)
+    rsi_ok, rsi_min, rsi_max = _last_rsi_ok(rsi_value, settings, symbol)
 
     dipped = low <= ema_px + near or close <= ema_px + near or low <= mid_px
     bounce = close > open_
@@ -103,6 +111,7 @@ def _near_high_continuation(
     *,
     settings: Settings,
     sma_px: float | None,
+    symbol: str = "",
 ) -> tuple[Signal, str]:
     lookback = int(settings.trend_range_lookback)
     if bars is None or bars.empty or len(bars) < lookback + 2:
@@ -114,7 +123,7 @@ def _near_high_continuation(
     rsi_value = last_rsi(closes, settings.rsi_period)
     if rsi_value is None:
         return Signal.HOLD, "trend-cont techo: RSI no disponible"
-    rsi_ok, rsi_min, rsi_max = _last_rsi_ok(rsi_value, settings)
+    rsi_ok, rsi_min, rsi_max = _last_rsi_ok(rsi_value, settings, symbol)
     close = float(closes.iloc[-1])
     open_ = float(bars["open"].iloc[-1])
     range_high, _range_low, _frac, dist_high = _range_context(bars, lookback)
@@ -146,6 +155,7 @@ def _micro_higher_high(
     *,
     settings: Settings,
     sma_px: float | None,
+    symbol: str = "",
 ) -> tuple[Signal, str]:
     lookback = max(2, int(settings.trend_micro_lookback))
     range_lb = int(settings.trend_range_lookback)
@@ -158,7 +168,7 @@ def _micro_higher_high(
     rsi_value = last_rsi(closes, settings.rsi_period)
     if rsi_value is None:
         return Signal.HOLD, "micro-HH RSI no disponible"
-    rsi_ok, rsi_min, rsi_max = _last_rsi_ok(rsi_value, settings)
+    rsi_ok, rsi_min, rsi_max = _last_rsi_ok(rsi_value, settings, symbol)
     close = float(closes.iloc[-1])
     open_ = float(bars["open"].iloc[-1])
     prev_high = float(bars["high"].iloc[-2])
@@ -201,17 +211,21 @@ def detect_trend_pullback(
         if not pd.isna(last_sma) and float(last_sma) > 0:
             sma_px = float(last_sma)
 
-    dip, dip_detail = _continuation_dip(bars, settings=settings, sma_px=sma_px)
+    dip, dip_detail = _continuation_dip(bars, settings=settings, sma_px=sma_px, symbol=symbol)
     if dip is Signal.BUY:
         logger.info("%s | %s | tendencia 9m alcista", symbol or "?", dip_detail)
         return Signal.BUY, dip_detail
 
-    near, near_detail = _near_high_continuation(bars, settings=settings, sma_px=sma_px)
+    near, near_detail = _near_high_continuation(
+        bars, settings=settings, sma_px=sma_px, symbol=symbol
+    )
     if near is Signal.BUY:
         logger.info("%s | %s | tendencia 9m alcista", symbol or "?", near_detail)
         return Signal.BUY, near_detail
 
-    micro, micro_detail = _micro_higher_high(bars, settings=settings, sma_px=sma_px)
+    micro, micro_detail = _micro_higher_high(
+        bars, settings=settings, sma_px=sma_px, symbol=symbol
+    )
     if micro is Signal.BUY:
         logger.info("%s | %s | tendencia 9m alcista", symbol or "?", micro_detail)
         return Signal.BUY, micro_detail

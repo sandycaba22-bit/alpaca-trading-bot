@@ -241,6 +241,17 @@ class TradingEngine:
             self.settings.atr_trailing_mult,
             self.settings.telegram_notify_filtered,
         )
+        logger.info(
+            "Stops acciones | SL=%.2fx ATR piso=%.2f%% | Cripto | SL=%.2fx TP=%.2fx trail=%.2fx "
+            "piso TP=%.2f%% RSI pullback max=%.0f",
+            self.settings.stock_atr_sl_mult,
+            self.settings.stock_min_stop_pct * 100,
+            self.settings.crypto_atr_sl_mult,
+            self.settings.crypto_atr_tp_mult,
+            self.settings.crypto_atr_trailing_mult,
+            self.settings.crypto_min_tp_pct * 100,
+            self.settings.crypto_trend_pullback_rsi_max,
+        )
         if not self.executor.dry_run:
             self.executor.position_book.drop_dry_run_rows()
         self._sweep_dust_positions()
@@ -1360,11 +1371,16 @@ class TradingEngine:
         position,
         signal: Signal,
         atr_sl_mult: float | None = None,
+        entry_strategy: str | None = None,
     ) -> None:
         qty = float(position.qty) if position is not None else 0.0
         atr_value = self._remember_atr(symbol, last_atr(bars, self.settings.atr_period))
         bid, ask, spread = self._live_quote(symbol, tape)
         tape_spread = spread if spread is not None else (tape.spread_pct if tape else None)
+        strategy_key = entry_strategy
+        if strategy_key is None:
+            last_strategy = getattr(self.strategy, "last_strategy", None)
+            strategy_key = last_strategy.value if last_strategy is not None else None
         ctx = StrategyContext(
             symbol=symbol,
             bars=bars,
@@ -1374,6 +1390,7 @@ class TradingEngine:
             spread_pct=tape_spread,
             momentum_pct=momentum_pct(bars["close"], self.settings.momentum_bars),
             atr=atr_value,
+            entry_strategy=strategy_key,
         )
         logger.info(
             "%s | decisión señal=%s | precio=%.4f | spread=%s | pos_qty=%s | atr=%s",

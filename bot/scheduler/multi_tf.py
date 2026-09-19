@@ -102,6 +102,17 @@ class SymbolLayerCache:
     macro: MacroSnapshot | None = None
 
 
+@dataclass
+class Symbol6mScan:
+    bars: object
+    tape: object
+    last_price: float
+    position: object
+    has_long: bool
+    last_sl_mult: float | None = None
+    entry_strategy: str | None = None
+
+
 class SchedulerStateStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or STATE_PATH
@@ -306,25 +317,45 @@ class MultiTimeframeEngine:
 
         positions = positions_by_symbol(engine.executor.list_positions())
         active_symbols = list(self.active_symbols)
-        focus_symbol = self._pick_focus_symbol(active_symbols)
-        if focus_symbol:
-            label = "Cripto" if self.trading_mode is TradingMode.CRYPTO else "Acciones"
-            logger.info(
-                "%s foco | mejor momentum=%s | candidatos=%s",
-                label,
-                focus_symbol,
-                ",".join(active_symbols),
-            )
+        scans: dict[str, Symbol6mScan] = {}
         for index, symbol in enumerate(active_symbols):
             if engine.control.is_paused():
                 return
             if not is_symbol_tradable(symbol, clock):
                 continue
             try:
-                self._process_6m_symbol(
+                scan = self._scan_6m_symbol(symbol, positions)
+                if scan is not None:
+                    scans[symbol] = scan
+            except RateLimitError as exc:
+                logger.warning("%s | capa 6m rate limit — se continúa con el resto | %s", symbol, exc)
+            except Exception as exc:
+                logger.warning("%s | capa 6m fallo: %s", symbol, exc)
+            self._sleep_between_crypto_symbols(active_symbols, index)
+
+        focus_symbol = self._pick_focus_symbol(active_symbols)
+        if focus_symbol:
+            label = "Cripto" if self.trading_mode is TradingMode.CRYPTO else "Acciones"
+            focus_entry = self.cache.get(focus_symbol)
+            focus_signal = focus_entry.signal.value if focus_entry else "hold"
+            logger.info(
+                "%s foco | mejor=%s señal=%s | candidatos=%s",
+                label,
+                focus_symbol,
+                focus_signal,
+                ",".join(active_symbols),
+            )
+        for index, symbol in enumerate(active_symbols):
+            if engine.control.is_paused():
+                return
+            if symbol not in scans:
+                continue
+            try:
+                self._execute_6m_symbol(
                     symbol,
                     account,
                     positions,
+                    scans[symbol],
                     focus_symbol=focus_symbol,
                 )
             except RateLimitError as exc:
@@ -342,7 +373,7 @@ class MultiTimeframeEngine:
         return False
 
     def _pick_focus_symbol(self, symbols: list[str]) -> str | None:
-        """Elige el activo con mejor tendencia/retorno HTF (bull > sideways > bear)."""
+        """Prioriza BUY activo; si no hay, el mejor momentum HTF."""
         if not self._focus_best_only_enabled() or not symbols:
             return None
         if self.trading_mode is TradingMode.CRYPTO:
@@ -356,6 +387,8 @@ class MultiTimeframeEngine:
         for symbol in candidates:
             entry = self.cache.get(symbol) or SymbolLayerCache()
             score = 0.0
+            if entry.signal is Signal.BUY:
+                score += 200.0
             trend = (entry.trend or "").lower()
             if trend == "bull":
                 score += 50.0
@@ -370,23 +403,34 @@ class MultiTimeframeEngine:
                 best = symbol
         return best
 
-    def _process_6m_symbol(
+    def _focus_blocks_buy(
         self,
         symbol: str,
-        account,
-        positions: dict,
-        focus_symbol: str | None = None,
-    ) -> None:
+        focus_symbol: str | None,
+        signal: Signal,
+        has_long: bool,
+    ) -> bool:
+        if (
+            signal is not Signal.BUY
+            or not focus_symbol
+            or has_long
+            or normalize_symbol(symbol) == normalize_symbol(focus_symbol)
+        ):
+            return False
+        focus_entry = self.cache.get(focus_symbol)
+        if focus_entry is not None and focus_entry.signal is Signal.BUY:
+            return True
+        return False
+
+    def _scan_6m_symbol(self, symbol: str, positions: dict) -> Symbol6mScan | None:
         engine = self.engine
         cache = self.cache[symbol]
         signal_tf = self._signal_timeframe(symbol)
         bars = engine.market_data.get_bars(symbol, signal_tf, engine.settings.lookback_bars)
         if bars.empty:
-            return
+            return None
 
-        tape = engine.live_tape(
-            symbol, fallback_price=float(bars["close"].iloc[-1])
-        )
+        tape = engine.live_tape(symbol, fallback_price=float(bars["close"].iloc[-1]))
         last_price = tape.last_price if tape else float(bars["close"].iloc[-1])
         last_price = engine.latest_price(symbol, last_price)
         position = positions.get(normalize_symbol(symbol)) or positions.get(symbol)
@@ -403,6 +447,8 @@ class MultiTimeframeEngine:
         )
         cache.signal = signal
         cache.signal_detail = detail
+        last_strategy = getattr(engine.strategy, "last_strategy", None)
+        entry_strategy = last_strategy.value if last_strategy is not None else None
         logger.info(
             "%s | eval 6m | señal=%s | detalle=%s | precio=%.4f | spread=%s | htf=%s | posicion=%s",
             symbol,
@@ -413,6 +459,34 @@ class MultiTimeframeEngine:
             cache.trend or "n/a",
             "sí" if position is not None else "no",
         )
+        return Symbol6mScan(
+            bars=bars,
+            tape=tape,
+            last_price=last_price,
+            position=position,
+            has_long=has_long,
+            last_sl_mult=getattr(engine.strategy, "last_sl_mult", None),
+            entry_strategy=entry_strategy,
+        )
+
+    def _execute_6m_symbol(
+        self,
+        symbol: str,
+        account,
+        positions: dict,
+        scan: Symbol6mScan,
+        focus_symbol: str | None = None,
+    ) -> None:
+        engine = self.engine
+        cache = self.cache[symbol]
+        signal = cache.signal
+        detail = cache.signal_detail
+        bars = scan.bars
+        tape = scan.tape
+        last_price = scan.last_price
+        position = scan.position
+        has_long = scan.has_long
+        last_sl_mult = scan.last_sl_mult
 
         # Macro/regimen superior desactivado: TF_MACRO_STRONG_PCT nunca se activó (siempre sideways).
         # cache.trend / has_long / signal no dependen de macro_allows — no muta nada.
@@ -430,14 +504,9 @@ class MultiTimeframeEngine:
             logger.info("%s | SELL bloqueado — tendencia %s alcista", symbol, self._regime_timeframe(symbol))
             return
 
-        if (
-            signal is Signal.BUY
-            and focus_symbol
-            and normalize_symbol(symbol) != normalize_symbol(focus_symbol)
-            and not has_long
-        ):
+        if self._focus_blocks_buy(symbol, focus_symbol, signal, has_long):
             logger.info(
-                "%s | BUY omitido — foco en %s (mejor momentum)",
+                "%s | BUY omitido — foco %s también tiene BUY",
                 symbol,
                 focus_symbol,
             )
@@ -449,7 +518,6 @@ class MultiTimeframeEngine:
 
         settings = engine.settings
         filters = engine.signal_filters
-        last_sl_mult = getattr(engine.strategy, "last_sl_mult", None)
         # SMA y ADX de ruptura ya se aplican en el orquestador / selector de régimen.
         # No se re-filtran aquí para no duplicar el mismo veto.
 
@@ -502,6 +570,7 @@ class MultiTimeframeEngine:
             position,
             signal,
             atr_sl_mult=last_sl_mult,
+            entry_strategy=scan.entry_strategy,
         )
 
     def run_all_layers_once(self) -> None:
