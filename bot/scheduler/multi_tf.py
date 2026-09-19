@@ -15,6 +15,8 @@ from bot.market.assets import all_symbols, is_crypto_symbol, normalize_symbol, p
 from bot.market.mode import TradingMode, is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.security.exceptions import RateLimitError
 from bot.strategy.base import Signal
+from bot.strategy.entry_score import score_entry_gate
+from bot.strategy.indicators import momentum_pct
 from bot.strategy.multi_tf_analysis import (
     MacroSnapshot,
     SpikeSnapshot,
@@ -95,6 +97,8 @@ class SymbolLayerCache:
     spike: SpikeSnapshot | None = None
     signal: Signal = Signal.HOLD
     signal_detail: str = ""
+    entry_score: float = 0.0
+    entry_score_detail: str = ""
     structure: str = "sideways"
     structure_return_pct: float = 0.0
     trend: str = "sideways"
@@ -151,6 +155,8 @@ class SchedulerStateStore:
                     "spike_reason": sym_cache.spike.reason if sym_cache.spike else "",
                     "signal": sym_cache.signal.value,
                     "signal_detail": sym_cache.signal_detail,
+                    "entry_score": round(sym_cache.entry_score, 1),
+                    "entry_score_detail": sym_cache.entry_score_detail,
                     "structure": sym_cache.structure,
                     "structure_return_pct": round(sym_cache.structure_return_pct, 2),
                     "trend": sym_cache.trend,
@@ -389,6 +395,7 @@ class MultiTimeframeEngine:
             score = 0.0
             if entry.signal is Signal.BUY:
                 score += 200.0
+            score += float(entry.entry_score or 0.0) * 1.5
             trend = (entry.trend or "").lower()
             if trend == "bull":
                 score += 50.0
@@ -447,10 +454,29 @@ class MultiTimeframeEngine:
         )
         cache.signal = signal
         cache.signal_detail = detail
+        mom = momentum_pct(bars["close"], engine.settings.confirm_momentum_bars)
+        if signal is not Signal.HOLD:
+            gate = score_entry_gate(
+                signal,
+                trend=cache.trend,
+                structure=cache.structure,
+                trend_return_pct=cache.trend_return_pct,
+                structure_return_pct=cache.structure_return_pct,
+                momentum_pct=mom,
+                macro=cache.macro,
+                spike=cache.spike,
+                settings=engine.settings,
+            )
+            cache.entry_score = gate.total
+            cache.entry_score_detail = gate.summary()
+        else:
+            cache.entry_score = 0.0
+            cache.entry_score_detail = ""
         last_strategy = getattr(engine.strategy, "last_strategy", None)
         entry_strategy = last_strategy.value if last_strategy is not None else None
+        score_log = f" | {cache.entry_score_detail}" if cache.entry_score_detail else ""
         logger.info(
-            "%s | eval 6m | señal=%s | detalle=%s | precio=%.4f | spread=%s | htf=%s | posicion=%s",
+            "%s | eval 6m | señal=%s | detalle=%s | precio=%.4f | spread=%s | htf=%s | posicion=%s%s",
             symbol,
             signal.value,
             detail,
@@ -458,6 +484,7 @@ class MultiTimeframeEngine:
             f"{tape.spread_pct:.4%}" if tape and tape.spread_pct is not None else "n/a",
             cache.trend or "n/a",
             "sí" if position is not None else "no",
+            score_log,
         )
         return Symbol6mScan(
             bars=bars,
@@ -488,15 +515,6 @@ class MultiTimeframeEngine:
         has_long = scan.has_long
         last_sl_mult = scan.last_sl_mult
 
-        # Macro/regimen superior desactivado: TF_MACRO_STRONG_PCT nunca se activó (siempre sideways).
-        # cache.trend / has_long / signal no dependen de macro_allows — no muta nada.
-        # Para reactivar, descomentar el bloque siguiente.
-        # macro = cache.macro or MacroSnapshot("sideways", 0.0, False, False, "macro pendiente")
-        # allowed, macro_reason = macro_allows(signal, macro)
-        # if not allowed:
-        #     logger.info("%s | señal 6m %s bloqueada por macro: %s", symbol, signal.value, macro_reason)
-        #     return
-
         if cache.trend == "bear" and signal is Signal.BUY:
             logger.info("%s | BUY bloqueado — tendencia %s bajista", symbol, self._regime_timeframe(symbol))
             return
@@ -517,6 +535,15 @@ class MultiTimeframeEngine:
             return
 
         settings = engine.settings
+        if signal is Signal.BUY and settings.entry_score_enabled:
+            gate_detail = cache.entry_score_detail or f"score={cache.entry_score:.0f}"
+            if float(cache.entry_score) < float(settings.entry_score_min):
+                reason = f"score bajo ({gate_detail}, min={settings.entry_score_min:.0f})"
+                logger.info("%s | BUY filtrada por score | %s", symbol, reason)
+                cache.signal_detail = f"{detail} | {reason}"
+                engine._notify_signal_filtered(symbol, signal, reason)
+                return
+            logger.info("%s | score entrada OK | %s", symbol, gate_detail)
         filters = engine.signal_filters
         # SMA y ADX de ruptura ya se aplican en el orquestador / selector de régimen.
         # No se re-filtran aquí para no duplicar el mismo veto.

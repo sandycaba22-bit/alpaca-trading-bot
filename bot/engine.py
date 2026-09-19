@@ -252,6 +252,15 @@ class TradingEngine:
             self.settings.crypto_min_tp_pct * 100,
             self.settings.crypto_trend_pullback_rsi_max,
         )
+        logger.info(
+            "Score entrada | %s min=%.0f | colision=%s | macro -%.0f | spike -%.0f/+%.0f",
+            "on" if self.settings.entry_score_enabled else "off",
+            self.settings.entry_score_min,
+            self.settings.strategy_collision_mode,
+            self.settings.entry_score_macro_penalty,
+            self.settings.entry_score_spike_adverse_penalty,
+            self.settings.entry_score_spike_favor_bonus,
+        )
         if not self.executor.dry_run:
             self.executor.position_book.drop_dry_run_rows()
         self._sweep_dust_positions()

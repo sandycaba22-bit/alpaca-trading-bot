@@ -150,6 +150,12 @@ class Settings:
     squeeze_width_lookback: int = 20
     squeeze_volume_mult: float = 2.0
     strategy_collision_priority: str = "breakout"
+    strategy_collision_mode: str = "score"
+    entry_score_enabled: bool = True
+    entry_score_min: float = 50.0
+    entry_score_macro_penalty: float = 40.0
+    entry_score_spike_adverse_penalty: float = 35.0
+    entry_score_spike_favor_bonus: float = 20.0
     risk_percent_per_trade: float = 0.01
     daily_loss_limit_pct: float = 0.03
     use_fixed_risk_sizing: bool = True
@@ -640,6 +646,34 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         strategy_collision_priority=(
             os.getenv("STRATEGY_COLLISION_PRIORITY", "breakout").strip().lower() or "breakout"
+        ),
+        strategy_collision_mode=(
+            os.getenv("STRATEGY_COLLISION_MODE", "score").strip().lower() or "score"
+        ),
+        entry_score_enabled=_as_bool(os.getenv("ENTRY_SCORE_ENABLED"), default=True),
+        entry_score_min=bounded_float(
+            os.getenv("ENTRY_SCORE_MIN"), 50.0, min_value=20.0, max_value=120.0, name="ENTRY_SCORE_MIN"
+        ),
+        entry_score_macro_penalty=bounded_float(
+            os.getenv("ENTRY_SCORE_MACRO_PENALTY"),
+            40.0,
+            min_value=10.0,
+            max_value=80.0,
+            name="ENTRY_SCORE_MACRO_PENALTY",
+        ),
+        entry_score_spike_adverse_penalty=bounded_float(
+            os.getenv("ENTRY_SCORE_SPIKE_ADVERSE_PENALTY"),
+            35.0,
+            min_value=10.0,
+            max_value=80.0,
+            name="ENTRY_SCORE_SPIKE_ADVERSE_PENALTY",
+        ),
+        entry_score_spike_favor_bonus=bounded_float(
+            os.getenv("ENTRY_SCORE_SPIKE_FAVOR_BONUS"),
+            20.0,
+            min_value=5.0,
+            max_value=50.0,
+            name="ENTRY_SCORE_SPIKE_FAVOR_BONUS",
         ),
         risk_percent_per_trade=bounded_float(
             os.getenv("RISK_PERCENT_PER_TRADE"),

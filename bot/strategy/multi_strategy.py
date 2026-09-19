@@ -19,6 +19,7 @@ from bot.strategy.regime_selector import (
     select_regime,
 )
 from bot.strategy.signal_filters import SignalFilterLayer
+from bot.strategy.entry_score import score_strategy_candidate
 from bot.strategy.squeeze import detect_squeeze
 
 logger = logging.getLogger(__name__)
@@ -209,7 +210,7 @@ class MultiStrategyOrchestrator(Strategy):
                 None,
             )
 
-        picked = self._resolve(candidates)
+        picked = self._resolve(candidates, ctx)
         logger.info(
             "%s | pick=%s %s | regimen=%s | candidatas=%s",
             ctx.symbol,
@@ -220,9 +221,12 @@ class MultiStrategyOrchestrator(Strategy):
         )
         return picked
 
-    def _resolve(self, candidates: list[StrategyPick]) -> StrategyPick:
+    def _resolve(self, candidates: list[StrategyPick], ctx: StrategyContext) -> StrategyPick:
         if len(candidates) == 1:
             return candidates[0]
+        mode = str(getattr(self.settings, "strategy_collision_mode", "score") or "score").lower()
+        if mode == "score":
+            return self._resolve_by_score(candidates, ctx)
         priority = str(self.settings.strategy_collision_priority or "breakout").lower()
         if priority == "pullback":
             order = (
@@ -254,3 +258,36 @@ class MultiStrategyOrchestrator(Strategy):
                     )
                 return by_id[sid]
         return candidates[0]
+
+    def _resolve_by_score(self, candidates: list[StrategyPick], ctx: StrategyContext) -> StrategyPick:
+        scored: list[tuple[float, StrategyPick, str]] = []
+        for pick in candidates:
+            if pick.strategy is None:
+                continue
+            result = score_strategy_candidate(
+                pick.signal,
+                pick.strategy,
+                pick.regime,
+                ctx,
+                self.settings,
+            )
+            scored.append((result.total, pick, result.summary()))
+        if not scored:
+            return candidates[0]
+        scored.sort(key=lambda row: row[0], reverse=True)
+        best_score, best_pick, best_detail = scored[0]
+        if len(scored) > 1:
+            alts = ",".join(
+                f"{pick.strategy.value}:{score:.0f}"
+                for score, pick, _ in scored[1:]
+                if pick.strategy is not None
+            )
+            logger.info(
+                "%s | colision estrategias — score elige %s=%.0f (descarta %s) | %s",
+                ctx.symbol,
+                best_pick.strategy.value if best_pick.strategy else "none",
+                best_score,
+                alts,
+                best_detail,
+            )
+        return best_pick
