@@ -167,6 +167,67 @@ class TradingEngine:
         self._atr_cache: dict[str, float] = {}
         self._daily_halt_day = ""
         self.dynamic_tp = DynamicTakeProfitLayer(settings)
+        from bot.alpaca.crypto_maker import CryptoMakerConfig
+
+        self.executor._crypto_maker_config = CryptoMakerConfig.from_settings(settings)
+
+    def _submit_order(
+        self,
+        symbol: str,
+        qty: float,
+        side: OrderSide,
+        *,
+        price: float | None = None,
+        entry_price: float | None = None,
+        reason: str = "signal",
+        stop_price: float | None = None,
+        take_profit_price: float | None = None,
+        stop_pct: float | None = None,
+        take_profit_pct: float | None = None,
+        bid: float | None = None,
+        ask: float | None = None,
+        spread_pct: float | None = None,
+        attempt: int = 1,
+        urgent_fallback: bool = False,
+    ):
+        if is_crypto_symbol(symbol) and self.settings.crypto_maker_first_enabled:
+            return self.executor.submit_crypto_maker_first_order(
+                symbol,
+                qty,
+                side,
+                price=price,
+                entry_price=entry_price,
+                reason=reason,
+                stop_price=stop_price,
+                take_profit_price=take_profit_price,
+                stop_pct=stop_pct,
+                take_profit_pct=take_profit_pct,
+                bid=bid,
+                ask=ask,
+                spread_pct=spread_pct,
+                limit_spread_pct=self.settings.order_limit_spread_pct,
+                attempt=attempt,
+                maker_config=self.executor._crypto_maker_config,
+                urgent_fallback=urgent_fallback,
+            )
+        return self.executor.submit_smart_order(
+            symbol,
+            qty,
+            side,
+            price=price,
+            entry_price=entry_price,
+            reason=reason,
+            stop_price=stop_price,
+            take_profit_price=take_profit_price,
+            stop_pct=stop_pct,
+            take_profit_pct=take_profit_pct,
+            bid=bid,
+            ask=ask,
+            spread_pct=spread_pct,
+            limit_spread_pct=self.settings.order_limit_spread_pct,
+            attempt=attempt,
+            force_market=urgent_fallback,
+        )
 
     def run_once(self) -> None:
         """Ejecuta todas las capas una vez (modo --once)."""
@@ -265,6 +326,19 @@ class TradingEngine:
             self.settings.crypto_breakeven_buffer_pct * 100,
             self.settings.crypto_breakeven_buffer_atr_mult,
         )
+        if self.settings.crypto_maker_first_enabled:
+            logger.info(
+                "Cripto maker-first | ON | timeout=%ss fallback=%s retries=%s tick_inside=%s | "
+                "fee maker=%.2f%% taker=%.2f%%/lado",
+                self.settings.crypto_maker_timeout_seconds,
+                self.settings.crypto_maker_fallback,
+                self.settings.crypto_maker_max_retries,
+                self.settings.crypto_maker_tick_inside,
+                self.settings.crypto_maker_fee_pct,
+                self.settings.crypto_maker_taker_fee_pct,
+            )
+        else:
+            logger.info("Cripto maker-first | OFF (smart order taker/IOC actual)")
         logger.info(
             "Score entrada | %s min=%.0f | colision=%s | macro -%.0f | spike -%.0f/+%.0f",
             "on" if self.settings.entry_score_enabled else "off",
@@ -1018,7 +1092,7 @@ class TradingEngine:
                         self._pending.pop(pending.symbol.upper(), None)
                     return
             else:
-                result = self.executor.submit_smart_order(
+                result = self._submit_order(
                     pending.symbol,
                     pending.qty,
                     side,
@@ -1032,7 +1106,6 @@ class TradingEngine:
                     bid=bid,
                     ask=ask,
                     spread_pct=spread,
-                    limit_spread_pct=settings.order_limit_spread_pct,
                     attempt=pending.attempts,
                 )
             if result.accepted:
@@ -1590,7 +1663,7 @@ class TradingEngine:
             )
             audit("signal_buy", "allow", symbol=symbol, qty=decision.qty)
             buy_event_id = self._event_id(symbol, "open", "signal_6m")
-            result = self.executor.submit_smart_order(
+            result = self._submit_order(
                 symbol,
                 decision.qty,
                 OrderSide.BUY,
@@ -1603,7 +1676,6 @@ class TradingEngine:
                 bid=bid,
                 ask=ask,
                 spread_pct=spread,
-                limit_spread_pct=self.settings.order_limit_spread_pct,
                 attempt=1,
             )
             if result.accepted:

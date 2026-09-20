@@ -82,6 +82,14 @@ class Settings:
     order_retry_max_sl: int
     order_retry_timeout_sl_seconds: int
     order_retry_backoff_seconds: float
+    crypto_maker_first_enabled: bool
+    crypto_maker_timeout_seconds: int
+    crypto_maker_fallback: str
+    crypto_maker_max_retries: int
+    crypto_maker_tick_inside: int
+    crypto_maker_poll_seconds: float
+    crypto_maker_fee_pct: float
+    crypto_maker_taker_fee_pct: float
     adverse_momentum_pct: float
     backtest_years: int
     backtest_cash: float
@@ -343,6 +351,55 @@ def load_settings(env_path: Path | None = None) -> Settings:
             min_value=0.2,
             max_value=30.0,
             name="ORDER_RETRY_BACKOFF_SECONDS",
+        ),
+        crypto_maker_first_enabled=_as_bool(os.getenv("CRYPTO_MAKER_FIRST_ENABLED"), default=False),
+        crypto_maker_timeout_seconds=bounded_int(
+            os.getenv("CRYPTO_MAKER_TIMEOUT_SECONDS"),
+            45,
+            min_value=5,
+            max_value=300,
+            name="CRYPTO_MAKER_TIMEOUT_SECONDS",
+        ),
+        crypto_maker_fallback=(
+            fb
+            if (fb := (os.getenv("CRYPTO_MAKER_FALLBACK") or "taker").strip().lower())
+            in {"taker", "retry", "cancel"}
+            else "taker"
+        ),
+        crypto_maker_max_retries=bounded_int(
+            os.getenv("CRYPTO_MAKER_MAX_RETRIES"),
+            1,
+            min_value=0,
+            max_value=5,
+            name="CRYPTO_MAKER_MAX_RETRIES",
+        ),
+        crypto_maker_tick_inside=bounded_int(
+            os.getenv("CRYPTO_MAKER_TICK_INSIDE"),
+            0,
+            min_value=0,
+            max_value=10,
+            name="CRYPTO_MAKER_TICK_INSIDE",
+        ),
+        crypto_maker_poll_seconds=bounded_float(
+            os.getenv("CRYPTO_MAKER_POLL_SECONDS"),
+            2.0,
+            min_value=0.5,
+            max_value=15.0,
+            name="CRYPTO_MAKER_POLL_SECONDS",
+        ),
+        crypto_maker_fee_pct=bounded_float(
+            os.getenv("CRYPTO_MAKER_FEE_PCT"),
+            0.15,
+            min_value=0.0,
+            max_value=1.0,
+            name="CRYPTO_MAKER_FEE_PCT",
+        ),
+        crypto_maker_taker_fee_pct=bounded_float(
+            os.getenv("CRYPTO_MAKER_TAKER_FEE_PCT"),
+            0.25,
+            min_value=0.0,
+            max_value=1.0,
+            name="CRYPTO_MAKER_TAKER_FEE_PCT",
         ),
         adverse_momentum_pct=bounded_float(
             os.getenv("ADVERSE_MOMENTUM_PCT"), 0.008, min_value=0.0001, max_value=0.10, name="ADVERSE_MOMENTUM_PCT"

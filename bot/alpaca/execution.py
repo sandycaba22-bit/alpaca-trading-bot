@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import sys
+import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
@@ -51,6 +52,8 @@ class OrderSubmitResult:
     resting: bool = False
     order_id: str = ""
     submitted_qty: float = 0.0
+    liquidity_role: str = ""
+    fee_pct_estimate: float | None = None
 
 
 @dataclass(frozen=True)
@@ -417,6 +420,7 @@ class OrderExecutor:
     ) -> None:
         self.client = client
         self.dry_run = dry_run
+        self._crypto_maker_config: Any | None = None
         self.journal = journal or TradeJournal()
         # Libro local: fuente de verdad en dry-run; en live guarda SL/TP de alerta
         self.position_book = position_book or OpenPositionBook()
@@ -788,6 +792,293 @@ class OrderExecutor:
             wide_spread_market=wide_spread_market,
         )
 
+    def submit_crypto_maker_first_order(
+        self,
+        symbol: str,
+        qty: float,
+        side: OrderSide,
+        *,
+        price: float | None = None,
+        entry_price: float | None = None,
+        reason: str = "signal",
+        stop_price: float | None = None,
+        take_profit_price: float | None = None,
+        stop_pct: float | None = None,
+        take_profit_pct: float | None = None,
+        bid: float | None = None,
+        ask: float | None = None,
+        spread_pct: float | None = None,
+        limit_spread_pct: float = 0.0015,
+        attempt: int = 1,
+        maker_config: Any | None = None,
+        urgent_fallback: bool = False,
+    ) -> OrderSubmitResult:
+        """Cripto: limit GTC en bid/ask (maker), poll, fallback configurable. Acciones: smart order."""
+        from bot.alpaca.crypto_maker import (
+            CryptoMakerConfig,
+            choose_maker_limit_price,
+            estimate_liquidity_role,
+            estimated_fee_pct,
+            log_crypto_execution,
+        )
+
+        cfg = maker_config if maker_config is not None else CryptoMakerConfig()
+        if not cfg.enabled or not is_crypto_symbol(symbol):
+            return self.submit_smart_order(
+                symbol,
+                qty,
+                side,
+                price=price,
+                entry_price=entry_price,
+                reason=reason,
+                stop_price=stop_price,
+                take_profit_price=take_profit_price,
+                stop_pct=stop_pct,
+                take_profit_pct=take_profit_pct,
+                bid=bid,
+                ask=ask,
+                spread_pct=spread_pct,
+                limit_spread_pct=limit_spread_pct,
+                attempt=attempt,
+                force_market=urgent_fallback,
+            )
+
+        symbol = normalize_symbol(sanitize_symbol(symbol))
+        rules = self.asset_rules(symbol)
+        last_price = float(price or 0.0)
+        retries = max(0, int(cfg.max_retries))
+        tick_inside = int(cfg.tick_inside)
+
+        for maker_attempt in range(retries + 1):
+            limit_price = choose_maker_limit_price(
+                side,
+                bid,
+                ask,
+                symbol,
+                rules,
+                tick_inside=tick_inside + maker_attempt,
+            )
+            if limit_price <= 0:
+                logger.warning("%s | maker-first sin precio válido — fallback smart", symbol)
+                break
+
+            role_hint = estimate_liquidity_role(side, limit_price, bid, ask)
+            fee_est = estimated_fee_pct(role_hint, cfg)
+
+            if self.dry_run:
+                log_crypto_execution(
+                    symbol,
+                    side,
+                    order_id="dry_run",
+                    limit_price=limit_price,
+                    fill_price=limit_price,
+                    filled_qty=qty,
+                    role=role_hint,
+                    fee_pct=fee_est,
+                    tif=TimeInForce.GTC.value,
+                    attempt=attempt,
+                    reason=reason,
+                )
+                self._record_fill(
+                    symbol,
+                    qty,
+                    side,
+                    limit_price,
+                    entry_price=entry_price,
+                    reason=reason,
+                    dry_run=True,
+                    order_id="dry_run_maker",
+                    stop_price=stop_price,
+                    take_profit_price=take_profit_price,
+                    stop_pct=stop_pct,
+                    take_profit_pct=take_profit_pct,
+                )
+                return OrderSubmitResult(
+                    accepted=True,
+                    order={"dry_run": True, "type": "limit", "tif": "gtc"},
+                    order_type="limit",
+                    limit_price=limit_price,
+                    spread_pct=spread_pct,
+                    broker_detail="dry_run_maker",
+                    filled_qty=qty,
+                    fill_price=limit_price,
+                    filled=True,
+                    resting=False,
+                    order_id="dry_run_maker",
+                    submitted_qty=float(qty),
+                    liquidity_role=role_hint,
+                    fee_pct_estimate=fee_est,
+                )
+
+            self._require_live_confirm(symbol, qty, side)
+            try:
+                order = self._broker_submit(
+                    symbol,
+                    qty,
+                    side,
+                    TimeInForce.GTC,
+                    True,
+                    limit_price,
+                )
+            except Exception as exc:
+                detail = alpaca_reject_detail(exc)
+                logger.warning("%s | maker-first rechazada | %s", symbol, detail)
+                break
+
+            ok, status_detail = _order_was_accepted(order)
+            order_id = str(getattr(order, "id", "") or "")
+            if not ok:
+                return OrderSubmitResult(
+                    accepted=False,
+                    order_type="limit",
+                    limit_price=limit_price,
+                    spread_pct=spread_pct,
+                    broker_detail=status_detail,
+                    liquidity_role=role_hint,
+                    fee_pct_estimate=fee_est,
+                )
+
+            deadline = time.monotonic() + float(cfg.timeout_seconds)
+            final_order = order
+            while time.monotonic() < deadline:
+                kind = classify_order(final_order)
+                if kind == "filled":
+                    break
+                if kind == "failed":
+                    break
+                time.sleep(max(0.5, float(cfg.poll_interval_seconds)))
+                refreshed = self.get_order(order_id)
+                if refreshed is not None:
+                    final_order = refreshed
+
+            kind = classify_order(final_order)
+            filled_qty = float(getattr(final_order, "filled_qty", 0) or 0)
+            fill_price = float(getattr(final_order, "filled_avg_price", None) or limit_price or last_price)
+            remaining = _order_remaining(final_order)
+
+            if kind != "filled" and remaining > 0:
+                try:
+                    self.client.limiter.acquire("order")
+                    self.client.trading.cancel_order_by_id(order_id)
+                    logger.info("%s | maker-first timeout — cancel id=%s filled=%s", symbol, order_id, filled_qty)
+                except Exception as exc:
+                    log_caught(logger, "maker_cancel_failed", exc, symbol=symbol)
+
+            if filled_qty > 0 and (kind == "filled" or remaining <= 1e-9):
+                role = estimate_liquidity_role(side, limit_price, bid, ask)
+                fee_est = estimated_fee_pct(role, cfg)
+                log_crypto_execution(
+                    symbol,
+                    side,
+                    order_id=order_id,
+                    limit_price=limit_price,
+                    fill_price=fill_price,
+                    filled_qty=filled_qty,
+                    role=role,
+                    fee_pct=fee_est,
+                    tif=TimeInForce.GTC.value,
+                    attempt=attempt,
+                    reason=reason,
+                )
+                self._record_fill(
+                    symbol,
+                    filled_qty,
+                    side,
+                    fill_price,
+                    entry_price=entry_price,
+                    reason=reason,
+                    dry_run=False,
+                    order_id=order_id,
+                    stop_price=stop_price,
+                    take_profit_price=take_profit_price,
+                    stop_pct=stop_pct,
+                    take_profit_pct=take_profit_pct,
+                )
+                return OrderSubmitResult(
+                    accepted=True,
+                    order=final_order,
+                    order_type="limit",
+                    limit_price=limit_price,
+                    spread_pct=spread_pct,
+                    broker_detail=f"maker_first filled qty={filled_qty:g}",
+                    filled_qty=filled_qty,
+                    fill_price=fill_price,
+                    filled=True,
+                    resting=False,
+                    order_id=order_id,
+                    submitted_qty=float(qty),
+                    liquidity_role=role,
+                    fee_pct_estimate=fee_est,
+                )
+            if filled_qty > 0:
+                logger.warning(
+                    "%s | maker-first fill parcial qty=%s/%s — continúa fallback",
+                    symbol,
+                    f"{filled_qty:g}",
+                    f"{qty:g}",
+                )
+                qty = max(0.0, float(qty) - filled_qty)
+                if qty <= 0:
+                    return OrderSubmitResult(
+                        accepted=True,
+                        order=final_order,
+                        order_type="limit",
+                        limit_price=limit_price,
+                        spread_pct=spread_pct,
+                        broker_detail="maker_first partial complete",
+                        filled_qty=filled_qty,
+                        fill_price=fill_price,
+                        filled=True,
+                        resting=False,
+                        order_id=order_id,
+                        submitted_qty=filled_qty,
+                    )
+
+            if cfg.fallback == "cancel":
+                return OrderSubmitResult(
+                    accepted=False,
+                    order=final_order,
+                    order_type="limit",
+                    limit_price=limit_price,
+                    spread_pct=spread_pct,
+                    broker_detail="maker_first timeout (cancel, sin fallback)",
+                    filled_qty=filled_qty,
+                    liquidity_role=role_hint,
+                    fee_pct_estimate=fee_est,
+                )
+            if cfg.fallback == "retry" and maker_attempt < retries:
+                logger.info("%s | maker-first reintento %s/%s con tick_inside+%s", symbol, maker_attempt + 1, retries, 1)
+                continue
+            break
+
+        if cfg.fallback == "taker":
+            logger.info("%s | maker-first → fallback smart/taker | %s", symbol, reason)
+            return self.submit_smart_order(
+                symbol,
+                qty,
+                side,
+                price=price,
+                entry_price=entry_price,
+                reason=f"{reason}_maker_fallback",
+                stop_price=stop_price,
+                take_profit_price=take_profit_price,
+                stop_pct=stop_pct,
+                take_profit_pct=take_profit_pct,
+                bid=bid,
+                ask=ask,
+                spread_pct=spread_pct,
+                limit_spread_pct=limit_spread_pct,
+                attempt=attempt,
+                force_market=urgent_fallback,
+            )
+
+        return OrderSubmitResult(
+            accepted=False,
+            order_type="limit",
+            spread_pct=spread_pct,
+            broker_detail="maker_first sin fill y sin fallback",
+        )
+
     def _broker_submit(
         self,
         symbol: str,
@@ -975,20 +1266,38 @@ class OrderExecutor:
             "stop_loss",
             "take_profit",
         }
-        result = self.submit_smart_order(
-            symbol,
-            qty,
-            side,
-            price=price,
-            entry_price=entry,
-            reason=reason,
-            bid=bid,
-            ask=ask,
-            spread_pct=spread_pct,
-            limit_spread_pct=limit_spread_pct,
-            attempt=attempt,
-            force_market=urgent,
-        )
+        maker_cfg = getattr(self, "_crypto_maker_config", None)
+        if maker_cfg is not None and getattr(maker_cfg, "enabled", False) and is_crypto_symbol(symbol):
+            result = self.submit_crypto_maker_first_order(
+                symbol,
+                qty,
+                side,
+                price=price,
+                entry_price=entry,
+                reason=reason,
+                bid=bid,
+                ask=ask,
+                spread_pct=spread_pct,
+                limit_spread_pct=limit_spread_pct,
+                attempt=attempt,
+                maker_config=maker_cfg,
+                urgent_fallback=urgent,
+            )
+        else:
+            result = self.submit_smart_order(
+                symbol,
+                qty,
+                side,
+                price=price,
+                entry_price=entry,
+                reason=reason,
+                bid=bid,
+                ask=ask,
+                spread_pct=spread_pct,
+                limit_spread_pct=limit_spread_pct,
+                attempt=attempt,
+                force_market=urgent,
+            )
         if (
             result is not None
             and not result.accepted
