@@ -254,13 +254,16 @@ class TradingEngine:
         )
         logger.info(
             "Trailing 2 etapas | BE max(%.2f%%, %.1fx ATR) buffer=%.2fx ATR | "
-            "chase=%.1fx ATR tras BE | cripto BE max(%.2f%%, %.1fx ATR)",
+            "chase=%.1fx ATR tras BE | cripto BE max(%.2f%%, %.1fx ATR) "
+            "buffer=max(%.2f%%, %.1fx ATR)",
             self.settings.breakeven_activate_pct * 100,
             self.settings.breakeven_activate_atr_mult,
             self.settings.breakeven_buffer_atr_mult,
             self.settings.atr_trailing_mult,
             self.settings.crypto_breakeven_activate_pct * 100,
             self.settings.crypto_breakeven_activate_atr_mult,
+            self.settings.crypto_breakeven_buffer_pct * 100,
+            self.settings.crypto_breakeven_buffer_atr_mult,
         )
         logger.info(
             "Score entrada | %s min=%.0f | colision=%s | macro -%.0f | spike -%.0f/+%.0f",
@@ -548,6 +551,18 @@ class TradingEngine:
             status = status.split(".")[-1]
         filled_qty = float(getattr(order, "filled_qty", 0) or 0)
         fill_price = float(getattr(order, "filled_avg_price", None) or 0.0)
+        order_qty = float(getattr(order, "qty", 0) or row.qty or 0)
+        if row.is_close and row.side.lower() == "sell":
+            logger.info(
+                "%s | orden cierre API | id=%s status=%s order_qty=%s filled=%s avg=%.4f | %s",
+                row.symbol,
+                row.order_id,
+                status,
+                f"{order_qty:g}",
+                f"{filled_qty:g}",
+                fill_price,
+                kind,
+            )
         delta = filled_qty - float(row.filled_qty or 0.0)
         if delta > 1e-8 and fill_price > 0:
             side = OrderSide.BUY if row.side.lower() == "buy" else OrderSide.SELL
@@ -621,6 +636,15 @@ class TradingEngine:
         tracked = self.executor.position_book.get(symbol)
         if broker_pos is None:
             if tracked is not None:
+                local_qty = abs(float(tracked.qty))
+                ref_qty = float(tracked.opened_qty or local_qty)
+                if effective_qty(self.settings, symbol, local_qty, ref_qty) > 0:
+                    logger.warning(
+                        "%s | broker sin posición pero libro qty=%s — residual no vendido",
+                        symbol,
+                        f"{local_qty:g}",
+                    )
+                    return local_qty
                 self.executor.position_book.close(symbol)
             return 0.0
         broker_qty = abs(float(broker_pos.qty))
@@ -647,6 +671,54 @@ class TradingEngine:
             self.executor.position_book.save()
         return eff_broker
 
+    def _retry_close_residual(
+        self,
+        symbol: str,
+        reason: str,
+        last_price: float,
+        *,
+        entry_price: float | None = None,
+    ) -> bool:
+        """Reintenta vender qty remanente en broker tras un cierre incompleto."""
+        if self.executor.pending_fills.has_close(symbol) or self._has_pending_close(symbol):
+            return False
+        bid, ask, spread = self._live_quote(symbol, None)
+        result = self.executor.close_position(
+            symbol,
+            price=last_price,
+            reason=f"{reason}_residual",
+            bid=bid,
+            ask=ask,
+            spread_pct=spread,
+            limit_spread_pct=self.settings.order_limit_spread_pct,
+            attempt=1,
+        )
+        if result is None or not result.accepted:
+            return False
+        submitted = float(getattr(result, "submitted_qty", 0.0) or 0.0)
+        if not result.filled:
+            event_id = self._event_id(symbol, "close", f"{reason}_residual", signal_ts=f"{entry_price or 0:.4f}")
+            self._watch_resting(
+                result,
+                symbol=symbol,
+                side="sell",
+                qty=submitted if submitted > 0 else 0.0,
+                reason=f"{reason}_residual",
+                is_close=True,
+                event_id=event_id,
+                entry_price=entry_price,
+                signal_price=last_price,
+            )
+            return True
+        fill_price = float(getattr(result, "fill_price", 0.0) or last_price)
+        filled_qty = float(getattr(result, "filled_qty", 0.0) or submitted)
+        remaining = self._reconcile_book_qty_from_broker(symbol)
+        tracked = self.executor.position_book.get(symbol)
+        ref_qty = float(tracked.opened_qty or tracked.qty) if tracked else submitted
+        if effective_qty(self.settings, symbol, remaining, ref_qty) <= 1e-8:
+            self._note_position_closed(symbol, reason)
+        return True
+
     def _notify_resting_close_outcome(
         self,
         row: RestingOrder,
@@ -655,14 +727,18 @@ class TradingEngine:
         *,
         order_status: str = "filled",
     ) -> None:
-        sold_qty = min(float(filled_qty), float(row.qty)) if filled_qty > 0 else float(row.qty)
+        requested_qty = float(row.qty)
+        sold_qty = min(float(filled_qty), requested_qty) if filled_qty > 0 else requested_qty
         price = fill_price if fill_price > 0 else row.signal_price
         entry = float(row.entry_price or price)
-        ref_qty = float(row.qty)
+        tracked = self.executor.position_book.get(row.symbol)
+        ref_qty = float(tracked.opened_qty or tracked.qty) if tracked is not None else requested_qty
         remaining_broker = self._reconcile_book_qty_from_broker(row.symbol)
         dust_total = float(row.dust_qty or 0.0)
         remaining_effective = effective_qty(self.settings, row.symbol, remaining_broker, ref_qty)
-        is_partial = remaining_effective > 1e-8 and sold_qty + 1e-8 < float(row.qty)
+        dust = dust_threshold_for(self.settings, row.symbol, ref_qty)
+        qty_gap = max(0.0, requested_qty - sold_qty)
+        is_partial = remaining_effective > 1e-8 or qty_gap > dust + 1e-8
         event_id = row.event_id or self._event_id(
             row.symbol, "close", row.reason, signal_ts=f"{entry:.4f}"
         )
@@ -671,20 +747,30 @@ class TradingEngine:
         snap = compute_pnl(row.symbol, sold_qty, entry, price, PnLEvent.CLOSED)
         self.reporter.emit(snap)
         if is_partial:
+            logger.warning(
+                "%s | cierre incompleto | vendido=%s pedido=%s broker_restante=%s gap=%s",
+                row.symbol,
+                f"{sold_qty:g}",
+                f"{requested_qty:g}",
+                f"{remaining_effective:g}",
+                f"{qty_gap:g}",
+            )
             self.notifier.notify_partial_close(
                 row.symbol,
                 sold_qty,
-                remaining_effective,
+                remaining_effective if remaining_effective > 0 else qty_gap,
                 entry,
                 price,
                 snap.pnl_abs,
                 snap.pnl_pct,
                 row.reason,
                 order_status,
-                float(row.qty),
+                requested_qty,
                 self.executor.dry_run,
                 event_id=event_id,
             )
+            if remaining_effective > 1e-8:
+                self._retry_close_residual(row.symbol, row.reason, price, entry_price=entry)
             return
         self._note_position_closed(row.symbol, row.reason)
         self.notifier.notify_closed(
@@ -1821,12 +1907,14 @@ class TradingEngine:
             )
             return False
         self._close_cooldown_until.pop(symbol.upper(), None)
+        submitted_qty = float(getattr(result, "submitted_qty", 0.0) or 0.0)
+        order_qty = submitted_qty if submitted_qty > 0 else qty
         if not result.filled:
             self._watch_resting(
                 result,
                 symbol=symbol,
                 side="sell",
-                qty=qty,
+                qty=order_qty,
                 reason=reason,
                 is_close=True,
                 event_id=event_id,
@@ -1835,31 +1923,43 @@ class TradingEngine:
             )
             return False
         fill_price = float(getattr(result, "fill_price", 0.0) or last_price) if result else last_price
-        filled_qty = float(getattr(result, "filled_qty", 0.0) or qty)
-        self._maybe_notify_fractional_wide(result, symbol, "sell", qty, event_id)
+        filled_qty = float(getattr(result, "filled_qty", 0.0) or order_qty)
+        self._maybe_notify_fractional_wide(result, symbol, "sell", order_qty, event_id)
         remaining = self._reconcile_book_qty_from_broker(symbol)
-        ref_qty = qty
+        ref_qty = order_qty
         tracked = self.executor.position_book.get(symbol)
         if tracked is not None:
-            ref_qty = float(tracked.opened_qty or qty)
+            ref_qty = float(tracked.opened_qty or order_qty)
         remaining_eff = effective_qty(self.settings, symbol, remaining, ref_qty)
-        if remaining_eff > 1e-8 and filled_qty + 1e-8 < qty:
+        dust = dust_threshold_for(self.settings, symbol, ref_qty)
+        qty_gap = max(0.0, order_qty - filled_qty)
+        if remaining_eff > 1e-8 or qty_gap > dust + 1e-8:
             snap = compute_pnl(symbol, filled_qty, entry_price, fill_price, PnLEvent.CLOSED)
             self.reporter.emit(snap)
+            logger.warning(
+                "%s | cierre incompleto | vendido=%s pedido=%s broker_restante=%s gap=%s",
+                symbol,
+                f"{filled_qty:g}",
+                f"{order_qty:g}",
+                f"{remaining_eff:g}",
+                f"{qty_gap:g}",
+            )
             self.notifier.notify_partial_close(
                 symbol,
                 filled_qty,
-                remaining_eff,
+                remaining_eff if remaining_eff > 0 else qty_gap,
                 entry_price,
                 fill_price,
                 snap.pnl_abs,
                 snap.pnl_pct,
                 reason,
                 str(getattr(result, "broker_detail", "") or "filled"),
-                qty,
+                order_qty,
                 self.executor.dry_run,
                 event_id=event_id,
             )
+            if remaining_eff > 1e-8:
+                self._retry_close_residual(symbol, reason, fill_price, entry_price=entry_price)
             return True
         snap = compute_pnl(symbol, filled_qty, entry_price, fill_price, PnLEvent.CLOSED)
         self.reporter.emit(snap)

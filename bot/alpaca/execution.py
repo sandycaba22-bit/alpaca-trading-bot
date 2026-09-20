@@ -50,6 +50,7 @@ class OrderSubmitResult:
     filled: bool = False
     resting: bool = False
     order_id: str = ""
+    submitted_qty: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -761,6 +762,7 @@ class OrderExecutor:
                 filled=kind == "filled",
                 resting=kind in {"resting", "partial"},
                 order_id=order_id,
+                submitted_qty=float(qty),
             )
 
         logger.warning(

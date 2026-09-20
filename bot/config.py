@@ -106,8 +106,10 @@ class Settings:
     crypto_atr_tp_mult: float = 6.0
     crypto_atr_trailing_mult: float = 2.0
     crypto_min_tp_pct: float = 0.03
-    crypto_breakeven_activate_pct: float = 0.0015
-    crypto_breakeven_activate_atr_mult: float = 0.5
+    crypto_breakeven_activate_pct: float = 0.0025
+    crypto_breakeven_activate_atr_mult: float = 0.6
+    crypto_breakeven_buffer_pct: float = 0.0025
+    crypto_breakeven_buffer_atr_mult: float = 0.6
     crypto_trade_best_only: bool = True
     crypto_trend_pullback_rsi_max: float = 78.0
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
@@ -450,17 +452,31 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         crypto_breakeven_activate_pct=bounded_float(
             os.getenv("CRYPTO_BREAKEVEN_ACTIVATE_PCT"),
-            0.0015,
+            0.0025,
             min_value=0.0001,
             max_value=0.08,
             name="CRYPTO_BREAKEVEN_ACTIVATE_PCT",
         ),
         crypto_breakeven_activate_atr_mult=bounded_float(
             os.getenv("CRYPTO_BREAKEVEN_ACTIVATE_ATR_MULT"),
-            0.5,
+            0.6,
             min_value=0.1,
             max_value=6.0,
             name="CRYPTO_BREAKEVEN_ACTIVATE_ATR_MULT",
+        ),
+        crypto_breakeven_buffer_pct=bounded_float(
+            os.getenv("CRYPTO_BREAKEVEN_BUFFER_PCT"),
+            0.0025,
+            min_value=0.0,
+            max_value=0.05,
+            name="CRYPTO_BREAKEVEN_BUFFER_PCT",
+        ),
+        crypto_breakeven_buffer_atr_mult=bounded_float(
+            os.getenv("CRYPTO_BREAKEVEN_BUFFER_ATR_MULT"),
+            0.6,
+            min_value=0.01,
+            max_value=2.0,
+            name="CRYPTO_BREAKEVEN_BUFFER_ATR_MULT",
         ),
         crypto_trade_best_only=_as_bool(os.getenv("CRYPTO_TRADE_BEST_ONLY"), default=True),
         crypto_trend_pullback_rsi_max=bounded_float(

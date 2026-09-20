@@ -86,7 +86,8 @@ class RiskManager:
                     breakeven_activate_pct=settings.crypto_breakeven_activate_pct,
                     breakeven_activate_atr_mult=settings.crypto_breakeven_activate_atr_mult,
                     breakeven_buffer=settings.breakeven_buffer,
-                    breakeven_buffer_atr_mult=settings.breakeven_buffer_atr_mult,
+                    breakeven_buffer_pct=settings.crypto_breakeven_buffer_pct,
+                    breakeven_buffer_atr_mult=settings.crypto_breakeven_buffer_atr_mult,
                     min_tp_pct=settings.crypto_min_tp_pct,
                 )
             return StopTakeProfitPolicy(

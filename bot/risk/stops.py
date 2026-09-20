@@ -48,6 +48,7 @@ class StopTakeProfitPolicy:
         breakeven_activate_pct: float = 0.006,
         breakeven_activate_atr_mult: float = 2.5,
         breakeven_buffer: float = 0.25,
+        breakeven_buffer_pct: float = 0.0,
         breakeven_buffer_atr_mult: float = 0.35,
         use_breakeven_lock: bool = True,
         min_tp_pct: float = 0.015,
@@ -68,6 +69,7 @@ class StopTakeProfitPolicy:
         self.breakeven_activate_pct = breakeven_activate_pct
         self.breakeven_activate_atr_mult = breakeven_activate_atr_mult
         self.breakeven_buffer = breakeven_buffer
+        self.breakeven_buffer_pct = max(0.0, float(breakeven_buffer_pct))
         self.breakeven_buffer_atr_mult = breakeven_buffer_atr_mult
         self.use_breakeven_lock = use_breakeven_lock
 
@@ -162,6 +164,7 @@ class StopTakeProfitPolicy:
         if stage_a and atr_value and atr_value > 0:
             buffer = max(
                 float(self.breakeven_buffer),
+                float(entry_price) * float(self.breakeven_buffer_pct),
                 float(atr_value) * float(self.breakeven_buffer_atr_mult),
             )
             if long:
