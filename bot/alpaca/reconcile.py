@@ -12,7 +12,7 @@ from bot.alpaca.execution import classify_order
 from bot.notify.telegram import TelegramNotifier
 from bot.security.audit import audit
 from bot.security.exceptions import ValidationError
-from bot.market.assets import normalize_symbol
+from bot.market.assets import is_crypto_symbol, normalize_symbol
 from bot.market.dust import effective_qty
 from bot.config import Settings
 from bot.storage.pending_orders import PendingOrderBook, RestingOrder
@@ -91,6 +91,83 @@ def local_qty_map(book: OpenPositionBook, settings: Settings | None = None) -> d
             ",".join(skipped),
         )
     return out
+
+
+def _profile_symbol_keys(settings: Settings | None) -> set[str] | None:
+    if settings is None or settings.bot_profile == "hybrid":
+        return None
+    if settings.bot_profile == "stocks":
+        symbols = settings.stock_symbols
+    elif settings.bot_profile == "crypto":
+        symbols = settings.crypto_symbols
+    else:
+        return None
+    return {normalize_symbol(sym) for sym in symbols if str(sym).strip()}
+
+
+def _filter_qty_map(qty_map: dict[str, float], allowed: set[str] | None) -> dict[str, float]:
+    if allowed is None:
+        return qty_map
+    return {symbol: qty for symbol, qty in qty_map.items() if symbol in allowed}
+
+
+def _default_sl_tp(settings: Settings, symbol: str, entry: float) -> tuple[float, float, float, float]:
+    if is_crypto_symbol(symbol):
+        stop_pct = max(float(settings.stop_loss_pct), 0.012)
+        take_pct = max(float(settings.take_profit_pct), float(settings.crypto_min_tp_pct))
+    else:
+        stop_pct = float(settings.stop_loss_pct)
+        take_pct = float(settings.take_profit_pct)
+    stop_price = entry * (1 - stop_pct)
+    take_price = entry * (1 + take_pct)
+    return stop_price, take_price, stop_pct, take_pct
+
+
+def adopt_broker_positions_for_profile(
+    client: AlpacaClient,
+    book: OpenPositionBook,
+    settings: Settings,
+) -> int:
+    """Incorpora al libro posiciones del broker ausentes localmente (solo símbolos del perfil)."""
+    allowed = _profile_symbol_keys(settings)
+    if allowed is None:
+        return 0
+
+    client.limiter.acquire("trading_read")
+    positions = list(client.trading.get_all_positions())
+    local = local_qty_map(book, settings)
+    adopted = 0
+    for pos in positions:
+        key = canonical_symbol(str(getattr(pos, "symbol", "")))
+        if not key or key not in allowed:
+            continue
+        qty = float(getattr(pos, "qty", 0) or 0)
+        if abs(qty) <= 1e-8:
+            continue
+        if key in local:
+            continue
+        entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+        if entry <= 0:
+            continue
+        stop_price, take_price, stop_pct, take_pct = _default_sl_tp(settings, key, entry)
+        book.open(
+            key,
+            abs(qty),
+            entry,
+            stop_price=stop_price,
+            take_profit_price=take_price,
+            stop_pct=stop_pct,
+            take_profit_pct=take_pct,
+            dry_run=False,
+        )
+        adopted += 1
+        logger.info(
+            "Reconcile adoptó posición del broker | %s qty=%s entry=%.4f",
+            key,
+            qty,
+            entry,
+        )
+    return adopted
 
 
 def diff_maps(broker: dict[str, float], local: dict[str, float]) -> ReconcileMismatch:
@@ -225,10 +302,20 @@ def assert_positions_match(
             notifier.notify_position_mismatch(message)
         raise ValidationError(message) from None
 
+    if settings is not None and settings.bot_profile in {"stocks", "crypto"}:
+        adopted = adopt_broker_positions_for_profile(client, book, settings)
+        if adopted:
+            logger.info("Reconcile adoptó %s posiciones del broker al libro local", adopted)
+
     local = local_qty_map(book, settings)
-    mismatch = diff_maps(broker, local)
+    allowed = _profile_symbol_keys(settings)
+    broker_view = _filter_qty_map(broker, allowed)
+    local_view = _filter_qty_map(local, allowed)
+    mismatch = diff_maps(broker_view, local_view)
     if mismatch.only_broker or mismatch.only_local or mismatch.qty_diff:
         message = format_mismatch(mismatch)
+        if allowed is not None:
+            message += f"\nPerfil activo: {settings.bot_profile} ({','.join(sorted(allowed)) or '—'})"
         logger.error("%s", message)
         audit(
             "reconcile",
@@ -238,12 +325,14 @@ def assert_positions_match(
             only_local=",".join(mismatch.only_local) or "-",
         )
         if notifier is not None:
-            notifier.notify_position_mismatch(message)
+            profile = settings.bot_profile if settings is not None else "hybrid"
+            notifier.notify_position_mismatch(message, profile=profile)
         raise ValidationError(message)
 
     logger.info(
-        "Reconcile OK | broker=%s | libro=%s",
-        ",".join(sorted(broker)) or "—",
-        ",".join(sorted(local)) or "—",
+        "Reconcile OK | broker=%s | libro=%s | perfil=%s",
+        ",".join(sorted(broker_view)) or "—",
+        ",".join(sorted(local_view)) or "—",
+        settings.bot_profile if settings is not None else "hybrid",
     )
     audit("reconcile", "allow", symbols=",".join(sorted(broker)) or "none")

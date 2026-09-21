@@ -1,4 +1,6 @@
 .env
+.env.stocks
+.env.crypto
 .venv/
 venv/
 __pycache__/

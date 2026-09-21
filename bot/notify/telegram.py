@@ -292,12 +292,13 @@ class TelegramNotifier:
         )
         return self._send(text)
 
-    def notify_position_mismatch(self, details: str) -> bool:
+    def notify_position_mismatch(self, details: str, *, profile: str = "") -> bool:
         lines = [
             "⛔ Bot NO arrancó — discrepancia de posiciones",
             details[:3000],
         ]
-        return self._send("\n".join(lines))
+        event_id = make_event_id(profile or "hybrid", "position_mismatch", "startup", "once")
+        return self._send_event(event_id, "\n".join(lines))
 
     def notify_order_timeout(
         self,
