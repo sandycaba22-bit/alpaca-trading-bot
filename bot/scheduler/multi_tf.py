@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from bot.config import PROJECT_ROOT
 from bot.market.assets import all_symbols, is_crypto_symbol, normalize_symbol, positions_by_symbol
+from bot.runtime_paths import data_file
 from bot.market.mode import TradingMode, is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.security.exceptions import RateLimitError
 from bot.strategy.base import Signal
@@ -32,8 +32,6 @@ if TYPE_CHECKING:
     from bot.engine import TradingEngine
 
 logger = logging.getLogger(__name__)
-
-STATE_PATH = PROJECT_ROOT / "data" / "scheduler_state.json"
 
 LAYER_NAMES = ("3m", "6m", "9m")
 CRYPTO_SYMBOL_QUERY_DELAY_SECONDS = 1.0
@@ -119,7 +117,7 @@ class Symbol6mScan:
 
 class SchedulerStateStore:
     def __init__(self, path: Path | None = None) -> None:
-        self.path = path or STATE_PATH
+        self.path = path or data_file("scheduler_state.json")
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def save(
@@ -173,10 +171,11 @@ class SchedulerStateStore:
 
     @staticmethod
     def read_public() -> dict:
-        if not STATE_PATH.exists():
+        path = data_file("scheduler_state.json")
+        if not path.exists():
             return {}
         try:
-            return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
 
@@ -191,9 +190,16 @@ class MultiTimeframeEngine:
         self.cache: dict[str, SymbolLayerCache] = {
             sym: SymbolLayerCache() for sym in all_symbols(engine.settings)
         }
+        profile = engine.settings.bot_profile
+        if profile == "crypto":
+            initial_mode = TradingMode.CRYPTO
+            initial_symbols = list(engine.settings.crypto_symbols)
+        else:
+            initial_mode = TradingMode.STOCKS
+            initial_symbols = list(engine.settings.stock_symbols)
         self.trading_mode: TradingMode | None = None
-        self.active_symbols: list[str] = list(engine.settings.stock_symbols)
-        self.trading_mode_label: str = trading_mode_label(TradingMode.STOCKS)
+        self.active_symbols: list[str] = initial_symbols
+        self.trading_mode_label: str = trading_mode_label(initial_mode, profile)
 
     def bootstrap(self) -> None:
         clock = self.engine.client.get_market_clock()
@@ -609,22 +615,24 @@ class MultiTimeframeEngine:
         self._persist()
 
     def _apply_trading_mode(self, clock) -> None:
+        profile = self.engine.settings.bot_profile
         mode, symbols = resolve_trading_mode(clock, self.engine.settings)
-        label = trading_mode_label(mode)
+        label = trading_mode_label(mode, profile)
         previous = self.trading_mode
-        if previous is None:
-            # Arranque: reintentar cierres cruzados que fallaron (p. ej. cripto con TIF inválido).
-            self.engine.close_positions_on_mode_switch(mode.value)
-        elif mode != previous:
-            logger.info(
-                "Transicion automatica de mercado | %s -> %s | activos: %s",
-                previous.value,
-                mode.value,
-                ",".join(symbols),
-            )
-            self.engine.close_positions_on_mode_switch(mode.value)
-            if self.engine.notifier.enabled:
-                self.engine.notifier.notify_mode_switch(label, symbols)
+        if profile == "hybrid":
+            if previous is None:
+                # Arranque: reintentar cierres cruzados que fallaron (p. ej. cripto con TIF inválido).
+                self.engine.close_positions_on_mode_switch(mode.value)
+            elif mode != previous:
+                logger.info(
+                    "Transicion automatica de mercado | %s -> %s | activos: %s",
+                    previous.value,
+                    mode.value,
+                    ",".join(symbols),
+                )
+                self.engine.close_positions_on_mode_switch(mode.value)
+                if self.engine.notifier.enabled:
+                    self.engine.notifier.notify_mode_switch(label, symbols)
         self.trading_mode = mode
         self.active_symbols = symbols
         self.trading_mode_label = label

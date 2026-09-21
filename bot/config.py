@@ -45,6 +45,9 @@ class Settings:
     api_secret_key: str = field(repr=False)
     api_base_url: str
     paper: bool
+    bot_profile: str
+    data_dir: Path
+    telegram_prefix: str
     log_level: str
     dry_run: bool
     poll_interval_seconds: int
@@ -206,10 +209,53 @@ class Settings:
             raise ValidationError("SMA_FAST debe ser menor que SMA_SLOW")
         if self.crypto_sma_fast >= self.crypto_sma_slow:
             raise ValidationError("CRYPTO_SMA_FAST debe ser menor que CRYPTO_SMA_SLOW")
+        if self.bot_profile == "stocks" and not self.stock_symbols:
+            raise ValidationError("BOT_PROFILE=stocks requiere SYMBOLS")
+        if self.bot_profile == "crypto" and not self.crypto_symbols:
+            raise ValidationError("BOT_PROFILE=crypto requiere CRYPTO_SYMBOLS")
+        if self.bot_profile == "crypto" and not self.paper:
+            raise ValidationError(
+                "BOT_PROFILE=crypto exige cuenta paper (APCA_API_BASE_URL paper)"
+            )
+
+
+def _parse_bot_profile(raw: str | None) -> str:
+    value = (raw or "hybrid").strip().lower()
+    if value not in {"stocks", "crypto", "hybrid"}:
+        raise ValidationError(f"BOT_PROFILE invalido: {value!r} (stocks|crypto|hybrid)")
+    return value
+
+
+def _resolve_data_dir(profile: str, explicit: str | None) -> Path:
+    if explicit and explicit.strip():
+        path = Path(explicit.strip())
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        return path
+    defaults = {"stocks": "data-stocks", "crypto": "data-crypto", "hybrid": "data"}
+    return PROJECT_ROOT / defaults[profile]
+
+
+def _resolve_telegram_prefix(profile: str, explicit: str | None) -> str:
+    if explicit and explicit.strip():
+        return explicit.strip()[:32]
+    if profile == "stocks":
+        return "[ACCIONES]"
+    if profile == "crypto":
+        return "[CRIPTO]"
+    return ""
 
 
 def load_settings(env_path: Path | None = None) -> Settings:
+    if env_path is None:
+        env_file = os.getenv("ENV_FILE", "").strip()
+        if env_file:
+            env_path = Path(env_file)
+            if not env_path.is_absolute():
+                env_path = PROJECT_ROOT / env_path
     load_dotenv(env_path or PROJECT_ROOT / ".env")
+
+    bot_profile = _parse_bot_profile(os.getenv("BOT_PROFILE"))
 
     api_key = os.getenv("APCA_API_KEY_ID", "").strip()
     api_secret = os.getenv("APCA_API_SECRET_KEY", "").strip()
@@ -239,16 +285,27 @@ def load_settings(env_path: Path | None = None) -> Settings:
             "No se arranca para evitar mezclar cuentas"
         )
 
-    stock_symbols = sanitize_symbols(os.getenv("SYMBOLS"), ["AAPL"])
-    crypto_symbols = sanitize_crypto_symbols(
-        os.getenv("CRYPTO_SYMBOLS"), ["BTC/USD", "ETH/USD"]
-    )
+    if bot_profile == "crypto":
+        stock_symbols = sanitize_symbols(os.getenv("SYMBOLS"), allow_empty=True)
+    else:
+        stock_symbols = sanitize_symbols(os.getenv("SYMBOLS"), ["AAPL"])
+    if bot_profile == "stocks":
+        crypto_symbols = sanitize_crypto_symbols(os.getenv("CRYPTO_SYMBOLS"), allow_empty=True)
+    else:
+        crypto_symbols = sanitize_crypto_symbols(
+            os.getenv("CRYPTO_SYMBOLS"), ["BTC/USD", "ETH/USD"]
+        )
+    data_dir = _resolve_data_dir(bot_profile, os.getenv("DATA_DIR"))
+    telegram_prefix = _resolve_telegram_prefix(bot_profile, os.getenv("TELEGRAM_PREFIX"))
 
     settings = Settings(
         api_key_id=api_key,
         api_secret_key=api_secret,
         api_base_url=base_url,
         paper=paper,
+        bot_profile=bot_profile,
+        data_dir=data_dir,
+        telegram_prefix=telegram_prefix,
         log_level=sanitize_log_level(os.getenv("LOG_LEVEL"), "INFO"),
         dry_run=_as_bool(os.getenv("DRY_RUN"), default=True),
         poll_interval_seconds=bounded_int(

@@ -7,10 +7,12 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from bot.config import PROJECT_ROOT
 from bot.market.assets import asset_class_for
+from bot.runtime_paths import data_file
 
-PARAMS_PATH = PROJECT_ROOT / "data" / "strategy_params.json"
+
+def _params_path() -> Path:
+    return data_file("strategy_params.json")
 
 
 @dataclass(frozen=True)
@@ -71,13 +73,14 @@ def load_symbol_params() -> dict[str, SymbolParams]:
 
 
 def save_symbol_params(params: dict[str, SymbolParams]) -> Path:
-    PARAMS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    path = _params_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "symbols": {symbol: asdict(row) for symbol, row in params.items()},
     }
-    PARAMS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return PARAMS_PATH
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
 
 
 def public_strategy_snapshot() -> dict:
@@ -106,10 +109,11 @@ def public_strategy_snapshot() -> dict:
 
 
 def _read() -> dict:
-    if not PARAMS_PATH.exists():
+    path = _params_path()
+    if not path.exists():
         return {}
     try:
-        data = json.loads(PARAMS_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}

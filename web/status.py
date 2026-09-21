@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 from bot.alpaca.client import AccountSnapshot, AlpacaClient
 from bot.alpaca.execution import OrderExecutor
 from bot.config import load_settings
+from bot.runtime_paths import configure_runtime_paths
 from bot.notify.telegram import TelegramNotifier
 from bot.reporting.pnl import PnLEvent, compute_pnl
 from bot.scheduler.multi_tf import SchedulerStateStore
@@ -40,6 +41,7 @@ def _empty_account(settings) -> AccountSnapshot:
 
 def main() -> int:
     settings = load_settings()
+    configure_runtime_paths(settings)
     client = AlpacaClient(settings)
     account = client.snapshot_account_optional() or _empty_account(settings)
     clock = client.get_market_clock()
@@ -90,7 +92,11 @@ def main() -> int:
             }
         )
     realized = journal.realized_pnl()
-    notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
+    notifier = TelegramNotifier(
+        settings.telegram_bot_token,
+        settings.telegram_chat_id,
+        prefix=settings.telegram_prefix,
+    )
     telegram_enabled = notifier.enabled
     scheduler = SchedulerStateStore.read_public()
     telegram_verified = bool(scheduler.get("telegram_enabled")) if scheduler else False
@@ -100,10 +106,12 @@ def main() -> int:
         except Exception:
             telegram_verified = False
     mode, active_symbols = resolve_trading_mode(clock, settings)
-    mode_label = trading_mode_label(mode)
+    mode_label = trading_mode_label(mode, settings.bot_profile)
     payload = {
         "paper": account.paper,
-        "mode": "hybrid",
+        "bot_profile": settings.bot_profile,
+        "data_dir": str(settings.data_dir.name),
+        "mode": settings.bot_profile,
         "dry_run": settings.dry_run,
         "status": str(account.status),
         "currency": account.currency,

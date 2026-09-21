@@ -15,12 +15,21 @@ class TradingMode(str, Enum):
 
 def resolve_trading_mode(clock: MarketClockView, settings: Settings) -> tuple[TradingMode, list[str]]:
     """Acciones cuando el mercado US está abierto; cripto en cierre, noches y fines de semana."""
+    profile = settings.bot_profile
+    if profile == "stocks":
+        return TradingMode.STOCKS, list(settings.stock_symbols)
+    if profile == "crypto":
+        return TradingMode.CRYPTO, list(settings.crypto_symbols)
     if clock.is_open:
         return TradingMode.STOCKS, list(settings.stock_symbols)
     return TradingMode.CRYPTO, list(settings.crypto_symbols)
 
 
-def trading_mode_label(mode: TradingMode) -> str:
+def trading_mode_label(mode: TradingMode, profile: str = "hybrid") -> str:
+    if profile == "stocks":
+        return "Modo Acciones"
+    if profile == "crypto":
+        return "Modo Cripto"
     if mode is TradingMode.STOCKS:
         return "Modo Acciones"
     return "Modo Cripto Nocturno/Fin de Semana"

@@ -5,7 +5,10 @@ const express = require('express');
 const session = require('express-session');
 const path = require('path');
 const { createBotState } = require('./bot_state');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const ENV_FILE = process.env.ENV_FILE
+    ? path.resolve(path.join(__dirname, '..'), process.env.ENV_FILE)
+    : path.join(__dirname, '..', '.env');
+require('dotenv').config({ path: ENV_FILE });
 
 function normalizeEnvValue(raw) {
     let value = String(raw || '').trim();

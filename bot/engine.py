@@ -146,6 +146,7 @@ class TradingEngine:
         self.notifier = notifier or TelegramNotifier(
             settings.telegram_bot_token,
             settings.telegram_chat_id,
+            prefix=settings.telegram_prefix,
         )
         self.control = BotControl()
         self._running = False
@@ -244,7 +245,7 @@ class TradingEngine:
         logger.info(
             "Motor Tesla 3-6-9 | %s | activos=%s | acciones=%s | cripto=%s | tick=%ss | "
             "capas 3m=%ss 6m=%ss 9m=%ss | dry_run=%s | SL=%.2f%% TP=%.2f%% | posiciones=%s",
-            trading_mode_label(mode),
+            trading_mode_label(mode, self.settings.bot_profile),
             ",".join(active) or "—",
             ",".join(self.settings.stock_symbols),
             ",".join(self.settings.crypto_symbols),
@@ -364,7 +365,7 @@ class TradingEngine:
         if self.notifier.enabled:
             logger.info("Telegram: arranque async (no bloquea el motor)")
             self.notifier.start_background_startup(
-                symbols=f"{trading_mode_label(mode)}: {','.join(active)}",
+                symbols=f"{trading_mode_label(mode, self.settings.bot_profile)}: {','.join(active)}",
                 tick_seconds=tick,
             )
         # SMA 3-6-9 sigue en run_tick (~60s). El loop es 1s: ticks WS + REST si hay fallback.

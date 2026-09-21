@@ -10,14 +10,13 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
+from bot.runtime_paths import data_file
 from bot.security.secrets import mask_secret, register_secret
-from bot.config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
 _TELEGRAM_HOST = "api.telegram.org"
 _TIMEOUT_SECONDS = 8
-_EVENTS_PATH = PROJECT_ROOT / "data" / "telegram_events.json"
 _EVENTS_MAX = 800
 
 
@@ -26,10 +25,11 @@ def make_event_id(symbol: str, kind: str, signal_ts: str, operation: str) -> str
 
 
 class TelegramNotifier:
-    def __init__(self, token: str = "", chat_id: str = "") -> None:
+    def __init__(self, token: str = "", chat_id: str = "", prefix: str = "") -> None:
         self.enabled = bool(token and chat_id)
         self._token = token
         self._chat_id = chat_id
+        self._prefix = prefix.strip()
         self._sent_lock = threading.Lock()
         self._sent_ids: set[str] = set()
         self._sent_order: list[str] = []
@@ -37,11 +37,15 @@ class TelegramNotifier:
             register_secret(token)
         self._load_sent_ids()
 
+    def _events_path(self):
+        return data_file("telegram_events.json")
+
     def _load_sent_ids(self) -> None:
         try:
-            if not _EVENTS_PATH.exists():
+            path = self._events_path()
+            if not path.exists():
                 return
-            raw = json.loads(_EVENTS_PATH.read_text(encoding="utf-8"))
+            raw = json.loads(path.read_text(encoding="utf-8"))
             ids = raw.get("ids", []) if isinstance(raw, dict) else raw
             if isinstance(ids, list):
                 ordered = [str(x) for x in ids[-_EVENTS_MAX:]]
@@ -53,8 +57,9 @@ class TelegramNotifier:
 
     def _save_sent_ids(self) -> None:
         try:
-            _EVENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _EVENTS_PATH.write_text(
+            path = self._events_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
                 json.dumps({"ids": self._sent_order[-_EVENTS_MAX:]}, indent=2),
                 encoding="utf-8",
             )
@@ -441,6 +446,9 @@ class TelegramNotifier:
         if not self.enabled:
             logger.debug("Telegram deshabilitado — mensaje omitido")
             return False
+        body = text
+        if self._prefix:
+            body = f"{self._prefix} {body}"
         url = f"https://{_TELEGRAM_HOST}/bot{self._token}/sendMessage"
         if urlparse(url).hostname != _TELEGRAM_HOST:
             logger.warning("Destino Telegram rechazado")
@@ -448,7 +456,7 @@ class TelegramNotifier:
         payload = json.dumps(
             {
                 "chat_id": self._chat_id,
-                "text": text[:3500],
+                "text": body[:3500],
                 "disable_web_page_preview": True,
             }
         ).encode("utf-8")

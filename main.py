@@ -19,6 +19,7 @@ from bot.backtest.optimize import WalkForwardOptimizer
 from bot.market.assets import all_symbols
 from bot.market.dust import refresh_crypto_mins
 from bot.config import load_settings
+from bot.runtime_paths import configure_runtime_paths
 from bot.engine import TradingEngine
 from bot.logging_setup import setup_logging
 from bot.notify.telegram import TelegramNotifier
@@ -245,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     try:
         settings = load_settings()
+        configure_runtime_paths(settings)
     except (ValidationError, SecurityError, ValueError) as exc:
         print(f"Configuracion invalida: {exc}", file=sys.stderr)
         return 1
@@ -270,9 +272,11 @@ def main(argv: list[str] | None = None) -> int:
         else "loop",
     )
     logger.info(
-        "=== Bot trading Alpaca | hibrido acciones+cripto | paper=%s | dry_run=%s ===",
+        "=== Bot trading Alpaca | profile=%s | paper=%s | dry_run=%s | data=%s ===",
+        settings.bot_profile,
         settings.paper,
         settings.dry_run,
+        settings.data_dir,
     )
 
     client = AlpacaClient(settings)
@@ -311,7 +315,11 @@ def main(argv: list[str] | None = None) -> int:
 
     control = BotControl()
     strategy, stored_params = _live_strategy(settings)
-    notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
+    notifier = TelegramNotifier(
+        settings.telegram_bot_token,
+        settings.telegram_chat_id,
+        prefix=settings.telegram_prefix,
+    )
     if notifier.enabled:
         logger.info("Telegram configurado — verificacion en segundo plano al entrar al loop")
     else:

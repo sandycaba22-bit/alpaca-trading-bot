@@ -9,16 +9,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from bot.config import PROJECT_ROOT
+from bot.runtime_paths import data_file
 
 logger = logging.getLogger(__name__)
-
-STATE_PATH = PROJECT_ROOT / "data" / "breakout_state.json"
 
 
 class BreakoutStateStore:
     def __init__(self, path: Path | None = None, *, persist: bool = True) -> None:
-        self.path = path or STATE_PATH
+        self.path = path or data_file("breakout_state.json")
         self.persist = persist
         self._open: set[str] = set()
         self._cooldowns: dict[str, dict] = {}

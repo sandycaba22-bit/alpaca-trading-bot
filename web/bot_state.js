@@ -4,11 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, execSync, execFileSync } = require('child_process');
 
-const PM2_APP = 'trading-bot';
-
 function loadProjectEnv(root) {
     const env = { ...process.env };
-    const envPath = path.join(root, '.env');
+    const envRel = process.env.ENV_FILE || '.env';
+    const envPath = path.isAbsolute(envRel) ? envRel : path.join(root, envRel);
     try {
         const raw = fs.readFileSync(envPath, 'utf8');
         for (const line of raw.split(/\r?\n/)) {
@@ -37,8 +36,10 @@ function loadProjectEnv(root) {
 }
 
 function createBotState(root, pythonBin) {
-    const controlPath = path.join(root, 'data', 'control.json');
-    const pidPath = path.join(root, 'data', 'bot.pid');
+    const PM2_APP = process.env.PM2_APP_NAME || 'trading-bot';
+    const DATA_DIR = process.env.DATA_DIR || 'data';
+    const controlPath = path.join(root, DATA_DIR, 'control.json');
+    const pidPath = path.join(root, DATA_DIR, 'bot.pid');
     const processLogPath = path.join(root, 'logs', 'bot_process.log');
     const projectEnv = () => loadProjectEnv(root);
 

@@ -8,10 +8,7 @@ import signal
 import sys
 from pathlib import Path
 
-from bot.config import PROJECT_ROOT
-
-CONTROL_PATH = PROJECT_ROOT / "data" / "control.json"
-PID_PATH = PROJECT_ROOT / "data" / "bot.pid"
+from bot.runtime_paths import data_file
 
 
 def pid_alive(pid: int | None) -> bool:
@@ -59,8 +56,8 @@ def kill_pid(pid: int | None) -> bool:
 
 class BotControl:
     def __init__(self, path: Path | None = None, pid_path: Path | None = None) -> None:
-        self.path = path or CONTROL_PATH
-        self.pid_path = pid_path or PID_PATH
+        self.path = path or data_file("control.json")
+        self.pid_path = pid_path or data_file("bot.pid")
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def is_paused(self) -> bool:

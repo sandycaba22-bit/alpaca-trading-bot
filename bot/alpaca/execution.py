@@ -18,8 +18,8 @@ from alpaca.trading.models import Order, Position
 from alpaca.trading.requests import GetOrdersRequest, LimitOrderRequest, MarketOrderRequest
 
 from bot.alpaca.client import AlpacaClient
-from bot.config import PROJECT_ROOT
 from bot.market.assets import is_crypto_symbol, normalize_symbol
+from bot.runtime_paths import data_file
 from bot.market.dust import dust_threshold_for
 from bot.notify.telegram import TelegramNotifier
 from bot.security.audit import audit
@@ -33,8 +33,11 @@ from bot.storage.positions import OpenPositionBook, TrackedPosition
 
 logger = logging.getLogger(__name__)
 
-LIVE_CONFIRM_PATH = PROJECT_ROOT / "data" / "live_confirm.txt"
 _CONFIRM_WORD = "CONFIRMO"
+
+
+def _live_confirm_path() -> Path:
+    return data_file("live_confirm.txt")
 
 
 @dataclass
@@ -1474,13 +1477,14 @@ class OrderExecutor:
     def _confirm_live_via_file(
         self, symbol: str, qty: float, side: OrderSide, account_id: str
     ) -> None:
-        word, file_account = _read_live_confirm_file(LIVE_CONFIRM_PATH)
+        confirm_path = _live_confirm_path()
+        word, file_account = _read_live_confirm_file(confirm_path)
         if word != _CONFIRM_WORD:
             self._block_live_order(
                 symbol,
                 qty,
                 side,
-                f"Falta {_CONFIRM_WORD} en {LIVE_CONFIRM_PATH} (linea 1)",
+                f"Falta {_CONFIRM_WORD} en {confirm_path} (linea 1)",
             )
         if not account_id:
             self._block_live_order(symbol, qty, side, "No se pudo leer el account id live")
@@ -1496,8 +1500,9 @@ class OrderExecutor:
     def _write_live_confirm_file(self, account_id: str) -> None:
         if not account_id:
             return
-        LIVE_CONFIRM_PATH.parent.mkdir(parents=True, exist_ok=True)
-        LIVE_CONFIRM_PATH.write_text(
+        confirm_path = _live_confirm_path()
+        confirm_path.parent.mkdir(parents=True, exist_ok=True)
+        confirm_path.write_text(
             f"{_CONFIRM_WORD}\n{account_id}\n",
             encoding="utf-8",
         )

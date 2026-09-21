@@ -8,12 +8,10 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from bot.config import PROJECT_ROOT
 from bot.market.assets import asset_class_for, normalize_symbol
+from bot.runtime_paths import data_file
 
 logger = logging.getLogger(__name__)
-
-POSITIONS_PATH = PROJECT_ROOT / "data" / "open_positions.json"
 
 
 def _book_key(symbol: str) -> str:
@@ -54,7 +52,7 @@ class OpenPositionBook:
     """
 
     def __init__(self, path: Path | None = None) -> None:
-        self.path = path or POSITIONS_PATH
+        self.path = path or data_file("open_positions.json")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._positions: dict[str, TrackedPosition] = {}
         self.load()

@@ -9,12 +9,10 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from bot.config import PROJECT_ROOT
 from bot.market.assets import normalize_symbol
+from bot.runtime_paths import data_file
 
 logger = logging.getLogger(__name__)
-
-PENDING_PATH = PROJECT_ROOT / "data" / "pending_orders.json"
 
 
 def _order_key(symbol: str) -> str:
@@ -48,7 +46,7 @@ class PendingOrderBook:
     """Registro persistente de órdenes en vuelo (limit DAY/GTC sin fill)."""
 
     def __init__(self, path: Path | None = None) -> None:
-        self.path = path or PENDING_PATH
+        self.path = path or data_file("pending_orders.json")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._orders: dict[str, RestingOrder] = {}

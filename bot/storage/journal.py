@@ -8,9 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from bot.config import PROJECT_ROOT
-
-DB_PATH = PROJECT_ROOT / "data" / "trades.db"
+from bot.runtime_paths import data_file
 
 
 @dataclass(frozen=True)
@@ -31,7 +29,7 @@ class TradeJournal:
     """Guarda cada fill paper en un archivo local. No almacena secretos."""
 
     def __init__(self, db_path: Path | None = None) -> None:
-        self.db_path = db_path or DB_PATH
+        self.db_path = db_path or data_file("trades.db")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._init()

@@ -8,11 +8,9 @@ import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from bot.config import PROJECT_ROOT
+from bot.runtime_paths import data_file
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_PATH = PROJECT_ROOT / "data" / "dynamic_tp_state.json"
 
 
 @dataclass
@@ -48,7 +46,7 @@ class DynamicTpRow:
 
 class DynamicTpStateStore:
     def __init__(self, path: Path | None = None) -> None:
-        self.path = path or DEFAULT_PATH
+        self.path = path or data_file("dynamic_tp_state.json")
         self._lock = threading.Lock()
         self._rows: dict[str, DynamicTpRow] = {}
         self.load()

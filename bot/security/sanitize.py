@@ -52,8 +52,15 @@ def sanitize_symbol(raw: str) -> str:
     return symbol
 
 
-def sanitize_crypto_symbols(raw: str | list[str] | None, default: list[str] | None = None) -> list[str]:
+def sanitize_crypto_symbols(
+    raw: str | list[str] | None,
+    default: list[str] | None = None,
+    *,
+    allow_empty: bool = False,
+) -> list[str]:
     if raw is None or raw == "":
+        if allow_empty:
+            return []
         values = list(default or [])
     elif isinstance(raw, str):
         values = [part.strip() for part in raw.split(",") if part.strip()]
@@ -62,6 +69,8 @@ def sanitize_crypto_symbols(raw: str | list[str] | None, default: list[str] | No
 
     symbols = [sanitize_symbol(item) for item in values if "/" in str(item)]
     if not symbols:
+        if allow_empty:
+            return []
         raise ValidationError("CRYPTO_SYMBOLS no puede estar vacio")
     if len(symbols) > MAX_SYMBOLS:
         raise ValidationError(f"Demasiados simbolos cripto (max {MAX_SYMBOLS})")
@@ -70,8 +79,15 @@ def sanitize_crypto_symbols(raw: str | list[str] | None, default: list[str] | No
     return symbols
 
 
-def sanitize_symbols(raw: str | list[str] | None, default: list[str] | None = None) -> list[str]:
+def sanitize_symbols(
+    raw: str | list[str] | None,
+    default: list[str] | None = None,
+    *,
+    allow_empty: bool = False,
+) -> list[str]:
     if raw is None or raw == "":
+        if allow_empty:
+            return []
         values = list(default or [])
     elif isinstance(raw, str):
         values = [part.strip() for part in raw.split(",") if part.strip()]
@@ -80,6 +96,8 @@ def sanitize_symbols(raw: str | list[str] | None, default: list[str] | None = No
 
     symbols = [sanitize_symbol(item) for item in values]
     if not symbols:
+        if allow_empty:
+            return []
         raise ValidationError("SYMBOLS no puede estar vacio")
     if len(symbols) > MAX_SYMBOLS:
         raise ValidationError(f"Demasiados simbolos (max {MAX_SYMBOLS})")
