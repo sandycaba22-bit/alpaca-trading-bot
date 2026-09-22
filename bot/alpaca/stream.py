@@ -100,6 +100,8 @@ class StreamHealth:
         """True la primera vez que un feed esperado tiene el socket abajo > stale_after."""
         now = time.monotonic()
         with self._lock:
+            if not self._expected_feeds:
+                return False
             if now - self.started_at < self.stale_after:
                 return False
             if not self._any_expected_socket_down_unlocked(now):
@@ -141,7 +143,9 @@ class StreamHealth:
             }
 
     def _any_expected_socket_down_unlocked(self, now: float) -> bool:
-        feeds = self._expected_feeds or {"any"}
+        if not self._expected_feeds:
+            return False
+        feeds = self._expected_feeds
         for feed in feeds:
             if feed in self._connected_feeds:
                 continue

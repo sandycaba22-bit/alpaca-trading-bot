@@ -200,6 +200,13 @@ class MultiTimeframeEngine:
         self.trading_mode: TradingMode | None = None
         self.active_symbols: list[str] = initial_symbols
         self.trading_mode_label: str = trading_mode_label(initial_mode, profile)
+        self._last_dormant_log_at: float = 0.0
+
+    def _stocks_market_dormant(self, clock) -> bool:
+        return (
+            self.engine.settings.bot_profile == "stocks"
+            and not bool(clock.is_open)
+        )
 
     def bootstrap(self) -> None:
         clock = self.engine.client.get_market_clock()
@@ -221,6 +228,18 @@ class MultiTimeframeEngine:
         clock = engine.client.get_market_clock()
         self._apply_trading_mode(clock)
         self._sync_intervals_for_mode()
+
+        if self._stocks_market_dormant(clock):
+            now_mono = time.monotonic()
+            if now_mono - self._last_dormant_log_at >= 3600.0:
+                logger.info(
+                    "Mercado US cerrado — bot acciones en reposo (sin escaneo 3-6-9; cripto sigue en su proceso)"
+                )
+                self._last_dormant_log_at = now_mono
+            if positions_by_symbol(engine.executor.list_positions()):
+                engine._mark_all_positions()
+            self._persist()
+            return
 
         now = time.monotonic()
         run_3m = self.scheduler.due("3m", now)
