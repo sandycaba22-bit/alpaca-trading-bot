@@ -129,11 +129,14 @@ class BreakoutStrategy(Strategy):
         )
 
     def volume_mult_for(self, symbol: str) -> float:
-        return float(
-            self.settings.breakout_volume_mult_overrides.get(
-                str(symbol).upper(), self.settings.breakout_volume_mult
-            )
-        )
+        from bot.market.assets import is_crypto_symbol
+
+        key = str(symbol).upper()
+        if key in self.settings.breakout_volume_mult_overrides:
+            return float(self.settings.breakout_volume_mult_overrides[key])
+        if is_crypto_symbol(symbol):
+            return float(self.settings.crypto_breakout_volume_mult)
+        return float(self.settings.breakout_volume_mult)
 
     def min_range_mult_for(self, symbol: str) -> float:
         return float(

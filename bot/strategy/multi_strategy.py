@@ -65,7 +65,12 @@ class MultiStrategyOrchestrator(Strategy):
         return pick.signal
 
     def evaluate(self, ctx: StrategyContext) -> StrategyPick:
-        regime = select_regime(ctx.symbol, ctx.bars, self.settings)
+        regime = select_regime(
+            ctx.symbol,
+            ctx.bars,
+            self.settings,
+            htf_trend=ctx.htf_trend,
+        )
         bb_value = (
             f"{regime.bb_width:.4f}/{regime.bb_width_avg:.4f}"
             if regime.bb_width is not None and regime.bb_width_avg is not None

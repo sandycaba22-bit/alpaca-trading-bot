@@ -315,6 +315,16 @@ class TradingEngine:
             self.settings.crypto_min_tp_pct * 100,
             self.settings.crypto_trend_pullback_rsi_max,
         )
+        if self.settings.crypto_regime_aggressive_enabled:
+            logger.info(
+                "Cripto régimen agresivo | ON | ADX umbral=%.1f | mean-rev RSI<=%.0f "
+                "| squeeze vol>=%.2fx | ruptura vol>=%.2fx | trend-PB lateral=%s",
+                self.settings.crypto_adx_threshold,
+                self.settings.crypto_rsi_oversold,
+                self.settings.crypto_squeeze_volume_mult,
+                self.settings.crypto_breakout_volume_mult,
+                "sí" if self.settings.crypto_trend_pullback_allow_sideways else "no",
+            )
         logger.info(
             "Trailing 2 etapas | BE max(%.2f%%, %.1fx ATR) buffer=%.2fx ATR | "
             "chase=%.1fx ATR tras BE | cripto BE max(%.2f%%, %.1fx ATR) "

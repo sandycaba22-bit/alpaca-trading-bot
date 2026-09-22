@@ -199,6 +199,13 @@ def detect_trend_pullback(
     slow_period: int | None = None,
 ) -> tuple[Signal, str]:
     trend = resolve_htf_trend(bars, htf_trend)
+    allow_sideways = bool(
+        symbol
+        and is_crypto_symbol(symbol)
+        and settings.crypto_trend_pullback_allow_sideways
+    )
+    if trend == "sideways" and allow_sideways:
+        trend = "bull"
     if trend != "bull":
         return Signal.HOLD, f"trend-pullback inactivo | tendencia 9m={trend}"
     if has_long:
@@ -230,7 +237,9 @@ def detect_trend_pullback(
         logger.info("%s | %s | tendencia 9m alcista", symbol or "?", micro_detail)
         return Signal.BUY, micro_detail
 
-    deep, deep_detail = mean_reversion_criteria(bars, settings=settings, has_long=has_long)
+    deep, deep_detail = mean_reversion_criteria(
+        bars, settings=settings, has_long=has_long, symbol=symbol
+    )
     if deep is Signal.BUY:
         why = deep_detail.replace("mean-rev BUY", "trend-pullback BUY", 1)
         logger.info("%s | %s | tendencia 9m alcista (dip profundo)", symbol or "?", why)

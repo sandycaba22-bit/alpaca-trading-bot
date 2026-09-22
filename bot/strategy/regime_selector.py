@@ -9,6 +9,7 @@ from enum import Enum
 import pandas as pd
 
 from bot.config import Settings
+from bot.market.assets import is_crypto_symbol, normalize_symbol
 from bot.strategy.indicators import bollinger_width, last_adx
 
 logger = logging.getLogger(__name__)
@@ -56,9 +57,47 @@ def _is_compressed(closes: pd.Series, settings: Settings) -> tuple[bool, float |
     return bool(below_avg and at_low), current, avg
 
 
-def select_regime(symbol: str, bars: pd.DataFrame, settings: Settings) -> RegimeSnapshot:
+def adx_threshold_for(symbol: str, settings: Settings) -> float:
+    key = normalize_symbol(symbol).upper()
+    if key in settings.adx_threshold_overrides:
+        return float(settings.adx_threshold_overrides[key])
+    if is_crypto_symbol(symbol):
+        return float(settings.crypto_adx_threshold)
+    return float(settings.adx_threshold)
+
+
+def _expand_crypto_aggressive(
+    regime: MarketRegime,
+    enabled: tuple[StrategyId, ...],
+    htf_trend: str | None,
+) -> tuple[StrategyId, ...]:
+    trend = str(htf_trend or "").strip().lower()
+    bullish_ctx = trend in ("bull", "sideways")
+    if regime is MarketRegime.RANGE:
+        if bullish_ctx:
+            return (
+                StrategyId.MEAN_REV,
+                StrategyId.PULLBACK,
+                StrategyId.TREND_PULLBACK,
+                StrategyId.BREAKOUT,
+            )
+        return (StrategyId.MEAN_REV, StrategyId.PULLBACK, StrategyId.BREAKOUT)
+    if regime is MarketRegime.SQUEEZE:
+        if bullish_ctx:
+            return (StrategyId.SQUEEZE, StrategyId.TREND_PULLBACK, StrategyId.BREAKOUT)
+        return (StrategyId.SQUEEZE, StrategyId.BREAKOUT, StrategyId.PULLBACK)
+    return enabled
+
+
+def select_regime(
+    symbol: str,
+    bars: pd.DataFrame,
+    settings: Settings,
+    *,
+    htf_trend: str | None = None,
+) -> RegimeSnapshot:
     adx_value = last_adx(bars, settings.adx_period) if bars is not None and not bars.empty else None
-    threshold = float(settings.adx_threshold_overrides.get(str(symbol).upper(), settings.adx_threshold))
+    threshold = adx_threshold_for(symbol, settings)
     compressed, width, width_avg = (False, None, None)
     if bars is not None and not bars.empty and "close" in bars.columns:
         compressed, width, width_avg = _is_compressed(bars["close"], settings)
@@ -83,6 +122,10 @@ def select_regime(symbol: str, bars: pd.DataFrame, settings: Settings) -> Regime
         regime = MarketRegime.UNKNOWN
         enabled = (StrategyId.BREAKOUT,)
         reason = "ADX no disponible — solo ruptura (fallback)"
+
+    if is_crypto_symbol(symbol) and settings.crypto_regime_aggressive_enabled:
+        enabled = _expand_crypto_aggressive(regime, enabled, htf_trend)
+        reason = f"{reason} | cripto agresivo HTF={htf_trend or 'n/a'}"
 
     logger.debug(
         "%s | regimen=%s | %s | habilitadas=%s",

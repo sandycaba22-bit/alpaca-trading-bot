@@ -7,6 +7,7 @@ import logging
 import pandas as pd
 
 from bot.config import Settings
+from bot.market.assets import is_crypto_symbol
 from bot.strategy.base import Signal
 from bot.strategy.indicators import bollinger, volume_vs_average
 from bot.strategy.regime_selector import _is_compressed
@@ -38,12 +39,15 @@ def detect_squeeze(
     close = float(bars["close"].iloc[-1])
     band_lo = float(lower.iloc[-1])
     band_hi = float(upper.iloc[-1])
+    vol_mult = float(settings.squeeze_volume_mult)
+    if symbol and is_crypto_symbol(symbol):
+        vol_mult = float(settings.crypto_squeeze_volume_mult)
     vol_ok, vol_ratio = volume_vs_average(
-        bars, settings.volume_confirmation_period, settings.squeeze_volume_mult
+        bars, settings.volume_confirmation_period, vol_mult
     )
     vol_txt = f"{vol_ratio:.2f}x" if vol_ratio is not None else "n/a"
     if vol_ok is False:
-        return Signal.HOLD, f"squeeze sin volumen ({vol_txt} < {settings.squeeze_volume_mult:.2f}x)"
+        return Signal.HOLD, f"squeeze sin volumen ({vol_txt} < {vol_mult:.2f}x)"
 
     if close > band_hi and not has_long:
         why = (

@@ -123,6 +123,14 @@ class Settings:
     crypto_breakeven_buffer_atr_mult: float = 0.6
     crypto_trade_best_only: bool = True
     crypto_trend_pullback_rsi_max: float = 78.0
+    crypto_adx_threshold: float = 12.0
+    crypto_regime_aggressive_enabled: bool = True
+    crypto_rsi_oversold: float = 38.0
+    crypto_rsi_overbought: float = 72.0
+    crypto_mean_rev_band_buffer_pct: float = 0.004
+    crypto_squeeze_volume_mult: float = 1.35
+    crypto_breakout_volume_mult: float = 1.25
+    crypto_trend_pullback_allow_sideways: bool = True
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
     stock_trade_best_only: bool = False
     stock_entry_score_min: float = 44.0
@@ -662,6 +670,56 @@ def load_settings(env_path: Path | None = None) -> Settings:
             min_value=55.0,
             max_value=90.0,
             name="CRYPTO_TREND_PULLBACK_RSI_MAX",
+        ),
+        crypto_adx_threshold=bounded_float(
+            os.getenv("CRYPTO_ADX_THRESHOLD"),
+            12.0,
+            min_value=5.0,
+            max_value=35.0,
+            name="CRYPTO_ADX_THRESHOLD",
+        ),
+        crypto_regime_aggressive_enabled=_as_bool(
+            os.getenv("CRYPTO_REGIME_AGGRESSIVE_ENABLED"),
+            default=(bot_profile == "crypto"),
+        ),
+        crypto_rsi_oversold=bounded_float(
+            os.getenv("CRYPTO_RSI_OVERSOLD"),
+            38.0,
+            min_value=20.0,
+            max_value=45.0,
+            name="CRYPTO_RSI_OVERSOLD",
+        ),
+        crypto_rsi_overbought=bounded_float(
+            os.getenv("CRYPTO_RSI_OVERBOUGHT"),
+            72.0,
+            min_value=55.0,
+            max_value=90.0,
+            name="CRYPTO_RSI_OVERBOUGHT",
+        ),
+        crypto_mean_rev_band_buffer_pct=bounded_float(
+            os.getenv("CRYPTO_MEAN_REV_BAND_BUFFER_PCT"),
+            0.004,
+            min_value=0.0,
+            max_value=0.02,
+            name="CRYPTO_MEAN_REV_BAND_BUFFER_PCT",
+        ),
+        crypto_squeeze_volume_mult=bounded_float(
+            os.getenv("CRYPTO_SQUEEZE_VOLUME_MULT"),
+            1.35,
+            min_value=1.0,
+            max_value=5.0,
+            name="CRYPTO_SQUEEZE_VOLUME_MULT",
+        ),
+        crypto_breakout_volume_mult=bounded_float(
+            os.getenv("CRYPTO_BREAKOUT_VOLUME_MULT"),
+            1.25,
+            min_value=0.8,
+            max_value=5.0,
+            name="CRYPTO_BREAKOUT_VOLUME_MULT",
+        ),
+        crypto_trend_pullback_allow_sideways=_as_bool(
+            os.getenv("CRYPTO_TREND_PULLBACK_ALLOW_SIDEWAYS"),
+            default=True,
         ),
         stock_trade_best_only=_as_bool(os.getenv("STOCK_TRADE_BEST_ONLY"), default=False),
         stock_entry_score_min=_resolve_profile_entry_score_min(
