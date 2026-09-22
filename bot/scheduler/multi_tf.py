@@ -25,6 +25,11 @@ from bot.security.exceptions import RateLimitError
 from bot.strategy.base import Signal
 from bot.strategy.entry_score import score_entry_gate
 from bot.strategy.indicators import momentum_pct
+from bot.strategy.crypto_asymmetric import (
+    evaluate_entry_live,
+    params_from_settings,
+    resample_4h_from_1h,
+)
 from bot.strategy.multi_tf_analysis import (
     MacroSnapshot,
     SpikeSnapshot,
@@ -209,6 +214,16 @@ class MultiTimeframeEngine:
         self.active_symbols: list[str] = initial_symbols
         self.trading_mode_label: str = trading_mode_label(initial_mode, profile)
         self._last_dormant_log_at: float = 0.0
+        self._crypto_trades_day: str = ""
+        self._crypto_trades_count: int = 0
+        if profile == "crypto":
+            self.scheduler.intervals["1h"] = int(engine.settings.crypto_asymmetric_tick_seconds)
+
+    def _crypto_profile_no_legacy(self) -> bool:
+        settings = self.engine.settings
+        if settings.bot_profile != "crypto" and self.trading_mode is not TradingMode.CRYPTO:
+            return False
+        return not settings.crypto_legacy_mtf_enabled
 
     def _stocks_market_dormant(self, clock) -> bool:
         return (
@@ -246,6 +261,22 @@ class MultiTimeframeEngine:
                 self._last_dormant_log_at = now_mono
             if positions_by_symbol(engine.executor.list_positions()):
                 engine._mark_all_positions()
+            self._persist()
+            return
+
+        if self._crypto_profile_no_legacy():
+            engine._mark_all_positions()
+            now_mono = time.monotonic()
+            settings = engine.settings
+            if not settings.crypto_asymmetric_live_enabled:
+                if now_mono - self._last_dormant_log_at >= 3600.0:
+                    logger.warning(
+                        "Cripto sin entradas — pipeline 6m/15m RETIRADO (ver DEPRECATED_CRYPTO_6M.md). "
+                        "Backtest IS+OOS positivo requerido para CRYPTO_ASYMMETRIC_LIVE_ENABLED=true"
+                    )
+                    self._last_dormant_log_at = now_mono
+            elif self.scheduler.due("1h", now_mono):
+                self._layer_crypto_asymmetric()
             self._persist()
             return
 
@@ -697,6 +728,89 @@ class MultiTimeframeEngine:
             trading_mode_label=self.trading_mode_label,
             active_symbols=self.active_symbols,
         )
+
+    def _crypto_trades_today_count(self) -> int:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today != self._crypto_trades_day:
+            self._crypto_trades_day = today
+            self._crypto_trades_count = 0
+        return self._crypto_trades_count
+
+    def _note_crypto_entry_today(self) -> None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today != self._crypto_trades_day:
+            self._crypto_trades_day = today
+            self._crypto_trades_count = 0
+        self._crypto_trades_count += 1
+
+    def _layer_crypto_asymmetric(self) -> None:
+        """Entrada 1H + confirmación 4H — reemplazo del pipeline 6m (legacy apagado)."""
+        engine = self.engine
+        settings = engine.settings
+        params = params_from_settings(settings)
+        account = engine.client.snapshot_account_optional()
+        positions = positions_by_symbol(engine.executor.list_positions())
+        profile_positions = filter_positions_for_profile(positions, settings.bot_profile)
+        lookback = max(int(settings.lookback_bars), 120)
+
+        for index, symbol in enumerate(self.active_symbols):
+            if not is_crypto_symbol(symbol):
+                continue
+            try:
+                bars_1h = engine.market_data.get_bars(symbol, "1Hour", lookback)
+                if bars_1h.empty:
+                    continue
+                bars_4h = resample_4h_from_1h(bars_1h)
+                position = profile_positions.get(normalize_symbol(symbol))
+                has_long = position is not None and float(position.qty) > 0
+                trades_today = self._crypto_trades_today_count()
+                sig = evaluate_entry_live(
+                    bars_1h,
+                    bars_4h,
+                    params,
+                    has_long=has_long,
+                    trades_today=trades_today,
+                )
+                last_price = float(bars_1h["close"].iloc[-1])
+                logger.info(
+                    "%s | eval 1H asim | señal=%s | %s | precio=%.4f | posicion=%s",
+                    symbol,
+                    "buy" if sig.allowed else "hold",
+                    sig.reason,
+                    last_price,
+                    "sí" if has_long else "no",
+                )
+                if not sig.allowed:
+                    continue
+                cache = self.cache[symbol]
+                cache.signal = Signal.BUY
+                cache.signal_detail = sig.reason
+                cache.trend = "bull"
+                cache.entry_score = float(entry_score_min_for(settings, symbol)) + 15.0
+                cache.entry_score_detail = "asim 1H/4H"
+                tape = engine.live_tape(symbol, fallback_price=last_price)
+                scan = Symbol6mScan(
+                    bars=bars_1h,
+                    tape=tape,
+                    last_price=last_price,
+                    position=position,
+                    has_long=has_long,
+                    last_sl_mult=settings.crypto_asymmetric_sl_atr_mult,
+                    entry_strategy="crypto_asymmetric_1h",
+                )
+                self._execute_6m_symbol(
+                    symbol,
+                    account,
+                    positions,
+                    scan,
+                    focus_symbol=None,
+                )
+                self._note_crypto_entry_today()
+            except RateLimitError as exc:
+                logger.warning("%s | capa 1H asim rate limit | %s", symbol, exc)
+            except Exception as exc:
+                logger.warning("%s | capa 1H asim fallo: %s", symbol, exc)
+            self._sleep_between_crypto_symbols(self.active_symbols, index)
 
     def _signal_timeframe(self, symbol: str) -> str:
         if is_crypto_symbol(symbol):

@@ -74,6 +74,24 @@ class RiskManager:
                     min_tp_pct=settings.min_tp_pct,
                 )
             if is_crypto_symbol(symbol):
+                if (
+                    settings.crypto_asymmetric_live_enabled
+                    and not settings.crypto_legacy_mtf_enabled
+                ):
+                    return StopTakeProfitPolicy(
+                        stop_loss_pct=policy.stop_loss_pct,
+                        take_profit_pct=0.99,
+                        atr_stop_mult=policy.atr_stop_mult,
+                        atr_sl_mult=settings.crypto_asymmetric_sl_atr_mult,
+                        atr_tp_mult=99.0,
+                        atr_trailing_mult=settings.crypto_asymmetric_trail_atr_mult,
+                        breakeven_activate_pct=0.02,
+                        breakeven_activate_atr_mult=settings.crypto_asymmetric_trail_activate_atr_mult,
+                        breakeven_buffer=settings.breakeven_buffer,
+                        breakeven_buffer_pct=settings.crypto_breakeven_buffer_pct,
+                        breakeven_buffer_atr_mult=settings.crypto_breakeven_buffer_atr_mult,
+                        min_tp_pct=0.0,
+                    )
                 return StopTakeProfitPolicy(
                     stop_loss_pct=policy.stop_loss_pct,
                     take_profit_pct=policy.take_profit_pct,

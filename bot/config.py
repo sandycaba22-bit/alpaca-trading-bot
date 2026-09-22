@@ -131,6 +131,21 @@ class Settings:
     crypto_squeeze_volume_mult: float = 1.35
     crypto_breakout_volume_mult: float = 1.25
     crypto_trend_pullback_allow_sideways: bool = True
+    # Legacy 6m/15m cripto — DEPRECATED (ver bot/strategy/DEPRECATED_CRYPTO_6M.md)
+    crypto_legacy_mtf_enabled: bool = False
+    # Live/paper cripto asimétrico 1H/4H — solo true tras backtest IS+OOS positivo
+    crypto_asymmetric_live_enabled: bool = False
+    crypto_asymmetric_breakout_lookback: int = 20
+    crypto_asymmetric_atr_pct_window: int = 100
+    crypto_asymmetric_atr_percentile: float = 75.0
+    crypto_asymmetric_htf_fast: int = 9
+    crypto_asymmetric_htf_slow: int = 21
+    crypto_asymmetric_max_trades_per_day: int = 3
+    crypto_asymmetric_sl_atr_mult: float = 1.2
+    crypto_asymmetric_trail_atr_mult: float = 2.75
+    crypto_asymmetric_trail_activate_atr_mult: float = 1.25
+    crypto_asymmetric_double_breakout: bool = False
+    crypto_asymmetric_tick_seconds: int = 3600
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
     stock_trade_best_only: bool = False
     stock_entry_score_min: float = 44.0
@@ -720,6 +735,83 @@ def load_settings(env_path: Path | None = None) -> Settings:
         crypto_trend_pullback_allow_sideways=_as_bool(
             os.getenv("CRYPTO_TREND_PULLBACK_ALLOW_SIDEWAYS"),
             default=True,
+        ),
+        crypto_legacy_mtf_enabled=_as_bool(os.getenv("CRYPTO_LEGACY_MTF_ENABLED"), default=False),
+        crypto_asymmetric_live_enabled=_as_bool(
+            os.getenv("CRYPTO_ASYMMETRIC_LIVE_ENABLED"), default=False
+        ),
+        crypto_asymmetric_breakout_lookback=bounded_int(
+            os.getenv("CRYPTO_ASYMMETRIC_BREAKOUT_LOOKBACK"),
+            20,
+            min_value=5,
+            max_value=120,
+            name="CRYPTO_ASYMMETRIC_BREAKOUT_LOOKBACK",
+        ),
+        crypto_asymmetric_atr_pct_window=bounded_int(
+            os.getenv("CRYPTO_ASYMMETRIC_ATR_PCT_WINDOW"),
+            100,
+            min_value=20,
+            max_value=500,
+            name="CRYPTO_ASYMMETRIC_ATR_PCT_WINDOW",
+        ),
+        crypto_asymmetric_atr_percentile=bounded_float(
+            os.getenv("CRYPTO_ASYMMETRIC_ATR_PERCENTILE"),
+            75.0,
+            min_value=50.0,
+            max_value=95.0,
+            name="CRYPTO_ASYMMETRIC_ATR_PERCENTILE",
+        ),
+        crypto_asymmetric_htf_fast=bounded_int(
+            os.getenv("CRYPTO_ASYMMETRIC_HTF_FAST"),
+            9,
+            min_value=3,
+            max_value=50,
+            name="CRYPTO_ASYMMETRIC_HTF_FAST",
+        ),
+        crypto_asymmetric_htf_slow=bounded_int(
+            os.getenv("CRYPTO_ASYMMETRIC_HTF_SLOW"),
+            21,
+            min_value=5,
+            max_value=100,
+            name="CRYPTO_ASYMMETRIC_HTF_SLOW",
+        ),
+        crypto_asymmetric_max_trades_per_day=bounded_int(
+            os.getenv("CRYPTO_ASYMMETRIC_MAX_TRADES_PER_DAY"),
+            3,
+            min_value=1,
+            max_value=20,
+            name="CRYPTO_ASYMMETRIC_MAX_TRADES_PER_DAY",
+        ),
+        crypto_asymmetric_sl_atr_mult=bounded_float(
+            os.getenv("CRYPTO_ASYMMETRIC_SL_ATR_MULT"),
+            1.2,
+            min_value=0.5,
+            max_value=3.0,
+            name="CRYPTO_ASYMMETRIC_SL_ATR_MULT",
+        ),
+        crypto_asymmetric_trail_atr_mult=bounded_float(
+            os.getenv("CRYPTO_ASYMMETRIC_TRAIL_ATR_MULT"),
+            2.75,
+            min_value=1.5,
+            max_value=6.0,
+            name="CRYPTO_ASYMMETRIC_TRAIL_ATR_MULT",
+        ),
+        crypto_asymmetric_trail_activate_atr_mult=bounded_float(
+            os.getenv("CRYPTO_ASYMMETRIC_TRAIL_ACTIVATE_ATR_MULT"),
+            1.25,
+            min_value=0.5,
+            max_value=4.0,
+            name="CRYPTO_ASYMMETRIC_TRAIL_ACTIVATE_ATR_MULT",
+        ),
+        crypto_asymmetric_double_breakout=_as_bool(
+            os.getenv("CRYPTO_ASYMMETRIC_DOUBLE_BREAKOUT"), default=False
+        ),
+        crypto_asymmetric_tick_seconds=bounded_int(
+            os.getenv("CRYPTO_ASYMMETRIC_TICK_SECONDS"),
+            3600,
+            min_value=300,
+            max_value=86400,
+            name="CRYPTO_ASYMMETRIC_TICK_SECONDS",
         ),
         stock_trade_best_only=_as_bool(os.getenv("STOCK_TRADE_BEST_ONLY"), default=False),
         stock_entry_score_min=_resolve_profile_entry_score_min(

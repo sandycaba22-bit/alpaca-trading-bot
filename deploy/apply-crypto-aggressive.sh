@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# DEPRECATED — sustituido por cripto asimétrico 1H/4H (ver DEPRECATED_CRYPTO_6M.md).
+# No usar en VPS; ejecutar scripts/_backtest_crypto_asymmetric.py antes de live.
 # Perfil cripto paper: más señales en lateral/squeeze sin tocar el bot de acciones.
 # Uso: cd ~/alpaca-trading-bot && bash deploy/apply-crypto-aggressive.sh
 

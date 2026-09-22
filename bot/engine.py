@@ -231,6 +231,19 @@ class TradingEngine:
             force_market=urgent_fallback,
         )
 
+    def _crypto_asymmetric_exits(self, symbol: str) -> bool:
+        s = self.settings
+        return (
+            is_crypto_symbol(symbol)
+            and s.crypto_asymmetric_live_enabled
+            and not s.crypto_legacy_mtf_enabled
+        )
+
+    def _buy_entry_reason(self, symbol: str) -> str:
+        if self._crypto_asymmetric_exits(symbol):
+            return "crypto_asymmetric_1h"
+        return "signal_6m"
+
     def run_once(self) -> None:
         """Ejecuta todas las capas una vez (modo --once)."""
         self._mtf_engine().run_all_layers_once()
@@ -315,16 +328,19 @@ class TradingEngine:
             self.settings.crypto_min_tp_pct * 100,
             self.settings.crypto_trend_pullback_rsi_max,
         )
-        if self.settings.crypto_regime_aggressive_enabled:
-            logger.info(
-                "Cripto régimen agresivo | ON | ADX umbral=%.1f | mean-rev RSI<=%.0f "
-                "| squeeze vol>=%.2fx | ruptura vol>=%.2fx | trend-PB lateral=%s",
-                self.settings.crypto_adx_threshold,
-                self.settings.crypto_rsi_oversold,
-                self.settings.crypto_squeeze_volume_mult,
-                self.settings.crypto_breakout_volume_mult,
-                "sí" if self.settings.crypto_trend_pullback_allow_sideways else "no",
-            )
+        if self.settings.bot_profile == "crypto" and not self.settings.crypto_legacy_mtf_enabled:
+            if self.settings.crypto_asymmetric_live_enabled:
+                logger.info(
+                    "Cripto asimétrico 1H/4H | LIVE ON | SL=%.2fx ATR | trail=%.2fx ATR "
+                    "| activar trail=%.2fx ATR | SIN TP fijo %%",
+                    self.settings.crypto_asymmetric_sl_atr_mult,
+                    self.settings.crypto_asymmetric_trail_atr_mult,
+                    self.settings.crypto_asymmetric_trail_activate_atr_mult,
+                )
+            else:
+                logger.warning(
+                    "Cripto entradas OFF — pipeline 6m/15m retirado; ver DEPRECATED_CRYPTO_6M.md"
+                )
         logger.info(
             "Trailing 2 etapas | BE max(%.2f%%, %.1fx ATR) buffer=%.2fx ATR | "
             "chase=%.1fx ATR tras BE | cripto BE max(%.2f%%, %.1fx ATR) "
@@ -1711,17 +1727,20 @@ class TradingEngine:
                 trail_mult_log,
             )
             audit("signal_buy", "allow", symbol=symbol, qty=decision.qty)
-            buy_event_id = self._event_id(symbol, "open", "signal_6m")
+            entry_reason = self._buy_entry_reason(symbol)
+            tp_price = 0.0 if self._crypto_asymmetric_exits(symbol) else levels.take_profit_price
+            tp_pct = 0.0 if self._crypto_asymmetric_exits(symbol) else levels.take_profit_pct
+            buy_event_id = self._event_id(symbol, "open", entry_reason)
             result = self._submit_order(
                 symbol,
                 decision.qty,
                 OrderSide.BUY,
                 price=last_price,
-                reason="signal_6m",
+                reason=entry_reason,
                 stop_price=levels.stop_price,
-                take_profit_price=levels.take_profit_price,
+                take_profit_price=tp_price,
                 stop_pct=levels.stop_pct,
-                take_profit_pct=levels.take_profit_pct,
+                take_profit_pct=tp_pct,
                 bid=bid,
                 ask=ask,
                 spread_pct=spread,
@@ -1735,16 +1754,16 @@ class TradingEngine:
                         symbol=symbol,
                         side="buy",
                         qty=decision.qty,
-                        reason="signal_6m",
+                        reason=entry_reason,
                         last_price=last_price,
                         is_close=False,
                         attempts=1,
                         first_at=time.monotonic(),
                         last_error=result.broker_detail,
                         stop_price=levels.stop_price,
-                        take_profit_price=levels.take_profit_price,
+                        take_profit_price=tp_price,
                         stop_pct=levels.stop_pct,
-                        take_profit_pct=levels.take_profit_pct,
+                        take_profit_pct=tp_pct,
                         signal_price=last_price,
                         event_id=buy_event_id,
                     )
@@ -1756,15 +1775,15 @@ class TradingEngine:
                     symbol=symbol,
                     side="buy",
                     qty=decision.qty,
-                    reason="signal_6m",
+                    reason=entry_reason,
                     is_close=False,
                     event_id=buy_event_id,
                     entry_price=last_price,
                     signal_price=last_price,
                     stop_price=levels.stop_price,
-                    take_profit_price=levels.take_profit_price,
+                    take_profit_price=tp_price,
                     stop_pct=levels.stop_pct,
-                    take_profit_pct=levels.take_profit_pct,
+                    take_profit_pct=tp_pct,
                 )
                 return
             positions[symbol] = self.executor.get_position(symbol)
