@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from bot.config import Settings
+from bot.config import Settings, entry_score_min_for
 from bot.strategy.base import Signal, StrategyContext
 from bot.strategy.multi_tf_analysis import MacroSnapshot, SpikeSnapshot
 from bot.strategy.regime_selector import MarketRegime, RegimeSnapshot, StrategyId
@@ -142,8 +142,8 @@ def score_entry_gate(
             total += 25.0
             parts.append("tendencia bull +25")
         elif trend_key == "sideways":
-            total += 5.0
-            parts.append("tendencia lateral +5")
+            total += 10.0
+            parts.append("tendencia lateral +10")
         elif trend_key == "bear":
             total -= 25.0
             parts.append("tendencia bear -25")
@@ -209,7 +209,7 @@ def score_entry_gate(
     return ScoreResult(total=total, parts=tuple(parts))
 
 
-def entry_allowed(result: ScoreResult, settings: Settings) -> bool:
+def entry_allowed(result: ScoreResult, settings: Settings, symbol: str | None = None) -> bool:
     if not settings.entry_score_enabled:
         return True
-    return float(result.total) >= float(settings.entry_score_min)
+    return float(result.total) >= entry_score_min_for(settings, symbol)

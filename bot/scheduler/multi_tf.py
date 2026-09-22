@@ -10,7 +10,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from bot.market.assets import all_symbols, is_crypto_symbol, normalize_symbol, positions_by_symbol
+from bot.config import entry_score_min_for
+from bot.market.assets import (
+    all_symbols,
+    count_open_positions_for_profile,
+    filter_positions_for_profile,
+    is_crypto_symbol,
+    normalize_symbol,
+    positions_by_symbol,
+)
 from bot.runtime_paths import data_file
 from bot.market.mode import TradingMode, is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.security.exceptions import RateLimitError
@@ -530,6 +538,7 @@ class MultiTimeframeEngine:
         focus_symbol: str | None = None,
     ) -> None:
         engine = self.engine
+        settings = engine.settings
         cache = self.cache[symbol]
         signal = cache.signal
         detail = cache.signal_detail
@@ -541,8 +550,23 @@ class MultiTimeframeEngine:
         last_sl_mult = scan.last_sl_mult
 
         if cache.trend == "bear" and signal is Signal.BUY:
-            logger.info("%s | BUY bloqueado — tendencia %s bajista", symbol, self._regime_timeframe(symbol))
-            return
+            structure = str(cache.structure or "").strip().lower()
+            score_ok = float(cache.entry_score) >= entry_score_min_for(settings, symbol) + 12.0
+            if structure != "bull" and not score_ok:
+                logger.info(
+                    "%s | BUY bloqueado — tendencia %s bajista (estructura=%s score=%.0f)",
+                    symbol,
+                    self._regime_timeframe(symbol),
+                    structure or "n/a",
+                    cache.entry_score,
+                )
+                return
+            logger.info(
+                "%s | BUY permitido pese a HTF bear — excepción estructura/score (estructura=%s score=%.0f)",
+                symbol,
+                structure or "n/a",
+                cache.entry_score,
+            )
         if cache.trend == "bull" and signal is Signal.SELL and not has_long:
             logger.info("%s | SELL bloqueado — tendencia %s alcista", symbol, self._regime_timeframe(symbol))
             return
@@ -559,11 +583,11 @@ class MultiTimeframeEngine:
             logger.info("%s | HOLD 6m | %s", symbol, detail)
             return
 
-        settings = engine.settings
+        score_min = entry_score_min_for(settings, symbol)
         if signal is Signal.BUY and settings.entry_score_enabled:
             gate_detail = cache.entry_score_detail or f"score={cache.entry_score:.0f}"
-            if float(cache.entry_score) < float(settings.entry_score_min):
-                reason = f"score bajo ({gate_detail}, min={settings.entry_score_min:.0f})"
+            if float(cache.entry_score) < float(score_min):
+                reason = f"score bajo ({gate_detail}, min={score_min:.0f})"
                 logger.info("%s | BUY filtrada por score | %s", symbol, reason)
                 cache.signal_detail = f"{detail} | {reason}"
                 engine._notify_signal_filtered(symbol, signal, reason)
@@ -582,10 +606,11 @@ class MultiTimeframeEngine:
                 return
 
         htf_already_bull = cache.trend == "bull"
+        htf_relaxed = cache.trend in ("bull", "sideways")
         if (
             signal is Signal.BUY
             and settings.entry_confirmation_enabled
-            and not htf_already_bull
+            and not htf_relaxed
         ):
             higher_tf = None
             higher_tf_label = self._higher_confirmation_timeframe(symbol)
@@ -605,17 +630,22 @@ class MultiTimeframeEngine:
                 cache.signal_detail = f"{detail} | {confirm.reason}"
                 engine._notify_signal_filtered(symbol, signal, confirm.reason)
                 return
-        elif signal is Signal.BUY and htf_already_bull:
+        elif signal is Signal.BUY and htf_relaxed:
             logger.info(
-                "%s | confirmación HTF omitida — tendencia %s ya es bull",
+                "%s | confirmación HTF omitida — tendencia %s (%s)",
                 symbol,
+                cache.trend or "n/a",
                 self._regime_timeframe(symbol),
             )
+
+        profile = settings.bot_profile
+        profile_positions = filter_positions_for_profile(positions, profile)
+        open_for_profile = count_open_positions_for_profile(positions, profile)
 
         engine._execute_signal(
             symbol,
             account,
-            positions,
+            profile_positions,
             bars,
             tape,
             last_price,

@@ -124,7 +124,12 @@ class Settings:
     crypto_trade_best_only: bool = True
     crypto_trend_pullback_rsi_max: float = 78.0
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
-    stock_trade_best_only: bool = True
+    stock_trade_best_only: bool = False
+    stock_entry_score_min: float = 44.0
+    crypto_entry_score_min: float = 42.0
+    capital_protection_enabled: bool = True
+    stock_capital_protection_max_loss_pct: float = 0.04
+    crypto_capital_protection_max_loss_pct: float = 0.05
     stock_atr_sl_mult: float = 2.0
     stock_min_stop_pct: float = 0.0035
     adx_period: int = 14
@@ -244,6 +249,64 @@ def _resolve_telegram_prefix(profile: str, explicit: str | None) -> str:
     if profile == "crypto":
         return "[CRIPTO]"
     return ""
+
+
+def _resolve_profile_entry_score_min(
+    profile_env: str | None,
+    global_env: str | None,
+    bot_profile: str,
+    *,
+    asset_profile: str,
+) -> float:
+    if profile_env is not None and str(profile_env).strip():
+        return bounded_float(
+            profile_env,
+            44.0 if asset_profile == "stocks" else 42.0,
+            min_value=20.0,
+            max_value=120.0,
+            name=f"{asset_profile.upper()}_ENTRY_SCORE_MIN",
+        )
+    if str(bot_profile).strip().lower() == asset_profile:
+        return 44.0 if asset_profile == "stocks" else 42.0
+    return bounded_float(
+        global_env,
+        50.0,
+        min_value=20.0,
+        max_value=120.0,
+        name="ENTRY_SCORE_MIN",
+    )
+
+
+def entry_score_min_for(settings: Settings, symbol: str | None = None) -> float:
+    """Umbral de score por perfil / clase de activo (split stocks vs crypto)."""
+    from bot.market.assets import is_crypto_symbol
+
+    sym = str(symbol or "").strip()
+    if sym and is_crypto_symbol(sym):
+        return float(settings.crypto_entry_score_min)
+    if sym and not is_crypto_symbol(sym):
+        return float(settings.stock_entry_score_min)
+    profile = str(settings.bot_profile or "hybrid").strip().lower()
+    if profile == "crypto":
+        return float(settings.crypto_entry_score_min)
+    if profile == "stocks":
+        return float(settings.stock_entry_score_min)
+    return float(settings.entry_score_min)
+
+
+def capital_protection_max_loss_pct_for(settings: Settings, symbol: str | None) -> float:
+    from bot.market.assets import is_crypto_symbol
+
+    sym = str(symbol or "").strip()
+    if sym and is_crypto_symbol(sym):
+        return float(settings.crypto_capital_protection_max_loss_pct)
+    if settings.bot_profile == "crypto":
+        return float(settings.crypto_capital_protection_max_loss_pct)
+    if sym and not is_crypto_symbol(sym):
+        return float(settings.stock_capital_protection_max_loss_pct)
+    if settings.bot_profile == "stocks":
+        return float(settings.stock_capital_protection_max_loss_pct)
+    return float(settings.stock_capital_protection_max_loss_pct)
 
 
 def load_settings(env_path: Path | None = None) -> Settings:
@@ -600,7 +663,34 @@ def load_settings(env_path: Path | None = None) -> Settings:
             max_value=90.0,
             name="CRYPTO_TREND_PULLBACK_RSI_MAX",
         ),
-        stock_trade_best_only=_as_bool(os.getenv("STOCK_TRADE_BEST_ONLY"), default=True),
+        stock_trade_best_only=_as_bool(os.getenv("STOCK_TRADE_BEST_ONLY"), default=False),
+        stock_entry_score_min=_resolve_profile_entry_score_min(
+            os.getenv("STOCK_ENTRY_SCORE_MIN"),
+            os.getenv("ENTRY_SCORE_MIN"),
+            bot_profile,
+            asset_profile="stocks",
+        ),
+        crypto_entry_score_min=_resolve_profile_entry_score_min(
+            os.getenv("CRYPTO_ENTRY_SCORE_MIN"),
+            os.getenv("ENTRY_SCORE_MIN"),
+            bot_profile,
+            asset_profile="crypto",
+        ),
+        capital_protection_enabled=_as_bool(os.getenv("CAPITAL_PROTECTION_ENABLED"), default=True),
+        stock_capital_protection_max_loss_pct=bounded_float(
+            os.getenv("STOCK_CAPITAL_PROTECTION_MAX_LOSS_PCT"),
+            0.04,
+            min_value=0.005,
+            max_value=0.20,
+            name="STOCK_CAPITAL_PROTECTION_MAX_LOSS_PCT",
+        ),
+        crypto_capital_protection_max_loss_pct=bounded_float(
+            os.getenv("CRYPTO_CAPITAL_PROTECTION_MAX_LOSS_PCT"),
+            0.05,
+            min_value=0.005,
+            max_value=0.25,
+            name="CRYPTO_CAPITAL_PROTECTION_MAX_LOSS_PCT",
+        ),
         stock_atr_sl_mult=bounded_float(
             os.getenv("STOCK_ATR_SL_MULTIPLIER"),
             2.0,

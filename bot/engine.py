@@ -23,6 +23,7 @@ from bot.alpaca.market_data import LiveTape, MarketDataService
 from bot.alpaca.stream import LiveMarketStream
 from bot.config import Settings
 from bot.market.assets import asset_class_for, is_crypto_symbol, normalize_symbol, positions_by_symbol
+from bot.risk.capital_protection import blocks_loss_exit, loss_exit_block_reason
 from bot.market.dust import dust_threshold_for, effective_qty, is_dust_qty, refresh_crypto_mins
 from bot.market.mode import is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.notify.telegram import TelegramNotifier, make_event_id
@@ -341,14 +342,24 @@ class TradingEngine:
         else:
             logger.info("Cripto maker-first | OFF (smart order taker/IOC actual)")
         logger.info(
-            "Score entrada | %s min=%.0f | colision=%s | macro -%.0f | spike -%.0f/+%.0f",
+            "Score entrada | %s acciones min=%.0f cripto min=%.0f | colision=%s | macro -%.0f | spike -%.0f/+%.0f",
             "on" if self.settings.entry_score_enabled else "off",
-            self.settings.entry_score_min,
+            self.settings.stock_entry_score_min,
+            self.settings.crypto_entry_score_min,
             self.settings.strategy_collision_mode,
             self.settings.entry_score_macro_penalty,
             self.settings.entry_score_spike_adverse_penalty,
             self.settings.entry_score_spike_favor_bonus,
         )
+        if self.settings.capital_protection_enabled:
+            logger.info(
+                "Protección capital | ON | stop ruido acciones hasta -%.2f%% | cripto hasta -%.2f%% "
+                "| tras candado BE se respeta SL del libro",
+                self.settings.stock_capital_protection_max_loss_pct * 100,
+                self.settings.crypto_capital_protection_max_loss_pct * 100,
+            )
+        else:
+            logger.info("Protección capital | OFF")
         if not self.executor.dry_run:
             self.executor.position_book.drop_dry_run_rows()
         self._sweep_dust_positions()
@@ -1480,6 +1491,27 @@ class TradingEngine:
                 reason.value,
             )
             return
+        if reason is ExitReason.STOP_LOSS:
+            be_locked = bool(getattr(tracked, "breakeven_notified", False))
+            if blocks_loss_exit(
+                entry_price=entry,
+                qty=qty,
+                last_price=last_price,
+                settings=self.settings,
+                symbol=symbol,
+                breakeven_locked=be_locked,
+            ):
+                logger.info(
+                    "%s | %s",
+                    symbol,
+                    loss_exit_block_reason(
+                        entry_price=entry,
+                        last_price=last_price,
+                        settings=self.settings,
+                        symbol=symbol,
+                    ),
+                )
+                return
         self._close_and_report(symbol, qty, entry, last_price, reason.value)
 
     def _mark_all_positions(self) -> None:

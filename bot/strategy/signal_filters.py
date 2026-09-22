@@ -171,6 +171,13 @@ class SignalFilterLayer:
                 f"confirmación por momentum {tf} ({mom_txt})",
                 htf_mom,
             )
+        local_mom = momentum_pct(bars["close"], settings.confirm_momentum_bars)
+        if local_mom is not None and local_mom > 0.0:
+            return FilterCheck(
+                True,
+                f"confirmación momentum operativo ({local_mom:+.2%})",
+                local_mom,
+            )
         if vol_ok is None and htf_ok is None:
             logger.info(
                 "%s | confirmación no disponible (volumen y %s) — se deja pasar la entrada",

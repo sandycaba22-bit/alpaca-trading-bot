@@ -51,3 +51,32 @@ def all_symbols(settings: Settings) -> list[str]:
 
 def asset_class_for(symbol: str) -> str:
     return "crypto" if is_crypto_symbol(symbol) else "stock"
+
+
+def position_matches_profile(symbol: str, bot_profile: str) -> bool:
+    """True si el símbolo pertenece al perfil PM2 (stocks / crypto / hybrid=all)."""
+    profile = str(bot_profile or "hybrid").strip().lower()
+    if profile == "hybrid":
+        return True
+    if profile == "crypto":
+        return is_crypto_symbol(symbol)
+    if profile == "stocks":
+        return is_stock_symbol(symbol)
+    return True
+
+
+def count_open_positions_for_profile(positions: dict[str, Any], bot_profile: str) -> int:
+    return sum(
+        1
+        for sym in positions
+        if position_matches_profile(sym, bot_profile)
+        and float(getattr(positions[sym], "qty", 0) or 0) != 0
+    )
+
+
+def filter_positions_for_profile(positions: dict[str, Any], bot_profile: str) -> dict[str, Any]:
+    return {
+        sym: pos
+        for sym, pos in positions.items()
+        if position_matches_profile(sym, bot_profile)
+    }
