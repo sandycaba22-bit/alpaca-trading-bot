@@ -1,6 +1,6 @@
 """Validación OOS (2025+) de cripto en 30Min y 1Hour — offline, no toca producción.
 
-Comparable con scripts/_validate_trailing_oos.py (6Min) y scripts/_sweep_crypto_timeframes.py.
+Comparable con scripts/_validate_trailing_oos.py y scripts/_sweep_crypto_timeframes.py.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from scripts._sweep_crypto_timeframes import (  # noqa: E402
     CACHE,
     DEFAULT_CRYPTO_FEE_PCT,
     DEFAULT_SLIPPAGE_PCT,
-    REF_6M_OOS,
     _confirm_ok,
     _confirm_tf,
     _entries_cache_path,
@@ -242,14 +241,7 @@ def _validate_symbol_tf(
 
 
 def _print_summary(rows: list[str]) -> None:
-    print("\n=== OOS 2025+ (two_stage 0.4×0.20) vs referencia 6Min ===")
-    ref_line = (
-        f"{'6Min REF':8} | {'BTC':>6} net {REF_6M_OOS['BTC/USD']['net_pct']:+.2f}% "
-        f"({REF_6M_OOS['BTC/USD']['trades']} tr) | "
-        f"{'ETH':>6} net {REF_6M_OOS['ETH/USD']['net_pct']:+.2f}% "
-        f"({REF_6M_OOS['ETH/USD']['trades']} tr)"
-    )
-    print(ref_line)
+    print("\n=== OOS 2025+ (two_stage 0.4×0.20) ===")
     print("-" * 72)
     for line in rows[1:]:
         parts = line.split(",")

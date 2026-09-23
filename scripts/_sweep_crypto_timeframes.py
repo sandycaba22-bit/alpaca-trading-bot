@@ -1,6 +1,6 @@
 """Sweep cripto por timeframe (15m / 30m / 1h) con costos Alpaca — offline, no toca producción.
 
-Compara 1 etapa vs 2 etapas (0.4×ATR / 0.20 buffer) recalibrando períodos desde baseline 6m.
+Compara 1 etapa vs 2 etapas (0.4×ATR / 0.20 buffer) recalibrando períodos por TF de entrada.
 Histórico: 2021-01-01 → hoy. Costos: 0.25%% comisión + 0.03%% slippage por lado (taker).
 """
 
@@ -32,23 +32,16 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(mess
 CACHE = PROJECT_ROOT / "data" / "bars_cache"
 OUT = PROJECT_ROOT / "logs" / "crypto_tf_sweep.csv"
 SYMBOLS = ("BTC/USD", "ETH/USD")
-ENTRY_TFS = ("6Min", "15Min", "30Min", "1Hour")
+ENTRY_TFS = ("15Min", "30Min", "1Hour")
 HISTORY_START = pd.Timestamp("2021-01-01", tz="UTC")
-BASE_ENTRY_MIN = 6
-CONFIRM_RATIO = 15 / 6  # 6m → 15m en sweep original
+BASE_ENTRY_MIN = 15
 DEFAULT_CRYPTO_FEE_PCT = 0.25
 DEFAULT_SLIPPAGE_PCT = 0.03
-
-# Referencia OOS 6m (two_stage 0.4×0.20, con costos) del sweep anterior
-REF_6M_OOS = {
-    "BTC/USD": {"gross_pct": -0.37, "net_pct": -17.52, "win_rate_pct": 70.7, "trades": 1531},
-    "ETH/USD": {"gross_pct": 0.21, "net_pct": -15.65, "win_rate_pct": 69.4, "trades": 1416},
-}
 
 
 def _tf_minutes(tf: str) -> int:
     return {
-        "6Min": 6,
+        "5Min": 5,
         "15Min": 15,
         "30Min": 30,
         "1Hour": 60,
@@ -61,9 +54,9 @@ def _scale_period(period: int, entry_tf: str, *, base_entry_min: int = BASE_ENTR
 
 
 def _confirm_tf(entry_tf: str) -> str:
-    """Misma ratio 2.5× que 6m→15m; elige TF Alpaca más cercano."""
+    """TF de confirmación ~2.5× el de entrada."""
     mapping = {
-        "6Min": "15Min",
+        "5Min": "15Min",
         "15Min": "30Min",
         "30Min": "1Hour",
         "1Hour": "1Day",
@@ -170,13 +163,6 @@ def _load_entries_cache(symbol: str, entry_tf: str, confirm_tf: str) -> list[int
         if isinstance(data, list):
             print(f"cache {symbol} {entry_tf}/{confirm_tf} entries={len(data)}")
             return data
-    if entry_tf == "6Min" and confirm_tf == "15Min":
-        legacy = CACHE / f"{symbol.replace('/', '-')}_entries.pkl"
-        if legacy.exists():
-            data = pickle.loads(legacy.read_bytes())
-            if isinstance(data, list):
-                print(f"cache legacy {symbol} 6Min entries={len(data)}")
-                return data
     return None
 
 
@@ -415,11 +401,7 @@ def _print_summary(rows: list[str]) -> None:
         if scheme != "two_stage" or act != "0.4" or buf != "0.2":
             continue
         trades, wr, gross, net = parts[8], parts[9], parts[10], parts[11]
-        ref = REF_6M_OOS.get(symbol, {})
-        ref_note = ""
-        if entry_tf == "6Min" and ref:
-            ref_note = f" | ref OOS gross={ref['gross_pct']:+.2f}% net={ref['net_pct']:+.2f}%"
-        print(f"{symbol} {entry_tf:6} | tr={trades:>5} wr={wr:>5}% gross={gross:>7}% net={net:>7}%{ref_note}")
+        print(f"{symbol} {entry_tf:6} | tr={trades:>5} wr={wr:>5}% gross={gross:>7}% net={net:>7}%")
 
     print("\n=== ¿Ambos símbolos neto positivo? (two_stage 0.4×0.20) ===")
     by_tf: dict[str, list[tuple[str, float]]] = {}
@@ -444,14 +426,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sweep cripto por timeframe con costos Alpaca")
     parser.add_argument("--symbols", nargs="*", default=list(SYMBOLS))
     parser.add_argument("--entry-tfs", nargs="*", default=["15Min", "30Min", "1Hour"])
-    parser.add_argument("--include-6min", action="store_true", help="Incluir baseline 6Min")
     parser.add_argument("--crypto-fee-pct", type=float, default=DEFAULT_CRYPTO_FEE_PCT)
     parser.add_argument("--slippage-pct", type=float, default=DEFAULT_SLIPPAGE_PCT)
     args = parser.parse_args()
 
     entry_tfs = list(args.entry_tfs)
-    if args.include_6min and "6Min" not in entry_tfs:
-        entry_tfs.insert(0, "6Min")
 
     base_settings = load_settings()
     client = AlpacaClient(base_settings)

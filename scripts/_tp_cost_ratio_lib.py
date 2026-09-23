@@ -21,7 +21,7 @@ from bot.storage.breakout_state import BreakoutStateStore
 
 CACHE = PROJECT_ROOT / "data" / "bars_cache"
 SYMBOLS = ("BTC/USD", "ETH/USD")
-ENTRY_TFS = ("6Min", "1Hour")
+ENTRY_TFS = ("15Min", "1Hour")
 RATIO_GRID = (0.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0)
 OOS_START = pd.Timestamp("2025-01-01", tz="UTC")
 BASE_ENTRY_MIN = 6
@@ -59,7 +59,7 @@ def round_trip_cost_pct(fee_pct: float, slippage_pct: float) -> float:
 
 
 def _tf_minutes(tf: str) -> int:
-    return {"6Min": 6, "15Min": 15, "30Min": 30, "1Hour": 60, "1Day": 1440}[tf]
+    return {"5Min": 5, "15Min": 15, "30Min": 30, "1Hour": 60, "1Day": 1440}[tf]
 
 
 def _scale_period(period: int, entry_tf: str, *, base_entry_min: int = BASE_ENTRY_MIN) -> int:
@@ -67,7 +67,7 @@ def _scale_period(period: int, entry_tf: str, *, base_entry_min: int = BASE_ENTR
 
 
 def confirm_tf(entry_tf: str) -> str:
-    return {"6Min": "15Min", "15Min": "30Min", "30Min": "1Hour", "1Hour": "1Day"}.get(
+    return {"5Min": "15Min", "15Min": "30Min", "30Min": "1Hour", "1Hour": "1Day"}.get(
         entry_tf, "15Min"
     )
 

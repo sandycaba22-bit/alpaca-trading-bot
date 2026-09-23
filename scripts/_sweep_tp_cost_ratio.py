@@ -1,6 +1,6 @@
 """Fase 1 — Calibración in-sample MIN_TP_TO_COST_RATIO (6 años, offline).
 
-Barrido fino del ratio TP/costo para BTC/USD y ETH/USD en 6Min y 1Hour.
+Barrido fino del ratio TP/costo para BTC/USD y ETH/USD en 15Min y 1Hour.
 Costos: 0.25%% comisión + 0.03%% slippage por lado (0.56%% ida y vuelta).
 Salida: logs/tp_cost_ratio_sweep.csv
 """
@@ -100,7 +100,7 @@ def main() -> int:
     )
 
     for entry_tf in args.entry_tfs:
-        print(f"\n--- {entry_tf} confirm={ {'6Min': '15Min', '1Hour': '1Day'}.get(entry_tf, '?')} ---")
+        print(f"\n--- {entry_tf} confirm={ {'15Min': '30Min', '1Hour': '1Day'}.get(entry_tf, '?')} ---")
         for filter_source in args.filter_sources:
             print(f"  filter_source={filter_source}")
             for symbol in args.symbols:

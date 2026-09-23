@@ -100,7 +100,7 @@ def main() -> None:
         print("RESULTADO: IS y OOS netos positivos — candidato a habilitar CRYPTO_ASYMMETRIC_LIVE_ENABLED")
     else:
         print("RESULTADO: NO desplegar — IS u OOS neto <= 0 (ajustar params o aceptar no-go)")
-    print("Ver bot/strategy/DEPRECATED_CRYPTO_6M.md — pipeline 6m descartado.")
+    print("Cripto live: solo asimétrico 1H/4H (CRYPTO_ASYMMETRIC_LIVE_ENABLED).")
     print("=" * 72)
 
     out = PROJECT_ROOT / "logs" / "crypto_asymmetric_validation.txt"

@@ -1,4 +1,4 @@
-"""Cripto asimétrico 1H entrada + confirmación 4H — reemplazo del pipeline 6m/15m.
+"""Cripto asimétrico 1H entrada + confirmación 4H.
 
 Entrada: ruptura lookback en 1H + ATR > percentil + tendencia alcista 4H (SMA/ADX/ATR sin escalar al mínimo).
 Salida (backtest / live vía risk): SL ceñido ATR, trailing ancho ATR, sin TP fijo %.
@@ -18,7 +18,7 @@ from bot.strategy.multi_tf_analysis import analyze_trend
 
 @dataclass(frozen=True)
 class CryptoAsymmetricParams:
-    """Períodos completos en velas 1H (no escala 6m→1h mínima)."""
+    """Períodos completos en velas 1H."""
 
     entry_timeframe: str = "1Hour"
     confirm_timeframe: str = "4H"
