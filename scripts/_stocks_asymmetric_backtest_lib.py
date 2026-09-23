@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +26,17 @@ OOS_START = pd.Timestamp("2025-01-01", tz="UTC")
 ENTRY_TF = "5Min"
 CONFIRM_TF = "15Min"
 SYMBOLS = ("AAPL", "MSFT")
+
+
+@dataclass(frozen=True)
+class EntryVariant:
+    """Parámetros de entrada para sweep (salidas fijas asimétricas)."""
+
+    name: str
+    volume_mult: float | None = None
+    volume_period: int = 20
+    adx_min: float | None = None
+    sma_slow: int | None = None
 
 
 @dataclass
@@ -139,28 +150,68 @@ def _htf_until(htf: pd.DataFrame, ts, htf_pos: int | None = None) -> pd.DataFram
     return htf.loc[htf.index < ts]
 
 
+def _entry_bar_volume_ok(
+    bars: pd.DataFrame, bar_i: int, period: int, mult: float
+) -> bool:
+    if "volume" not in bars.columns or bar_i <= 0:
+        return True
+    window = bars["volume"].iloc[max(0, bar_i - period) : bar_i]
+    if window.empty:
+        return False
+    avg = float(window.astype(float).mean())
+    if avg <= 0:
+        return False
+    vol = float(bars["volume"].iloc[bar_i])
+    return vol >= mult * avg
+
+
+def _resolve_entry_context(
+    settings: Settings,
+    sma_slow_by_symbol: dict[str, int],
+    variant: EntryVariant | None,
+) -> tuple[Settings, dict[str, int]]:
+    sma_map = dict(sma_slow_by_symbol)
+    eff = settings
+    if variant is None:
+        return eff, sma_map
+    if variant.adx_min is not None:
+        eff = replace(eff, adx_threshold=float(variant.adx_min), adx_filter_enabled=True)
+    if variant.sma_slow is not None:
+        slow = int(variant.sma_slow)
+        sma_map = {sym: slow for sym in sma_map}
+    return eff, sma_map
+
+
 def precompute_entries(
     settings: Settings,
     symbol: str,
     bars: pd.DataFrame,
     htf: pd.DataFrame,
     sma_slow_by_symbol: dict[str, int],
+    *,
+    variant: EntryVariant | None = None,
+    exit_policy: StopTakeProfitPolicy | None = None,
+    quiet: bool = False,
 ) -> list[int]:
-    orch = MultiStrategyOrchestrator(settings, sma_slow_by_symbol)
-    filters = SignalFilterLayer(settings, BreakoutStateStore(persist=False))
-    lookback = max(int(settings.lookback_bars), 80)
+    eff_settings, sma_map = _resolve_entry_context(settings, sma_slow_by_symbol, variant)
+    orch = MultiStrategyOrchestrator(eff_settings, sma_map)
+    filters = SignalFilterLayer(eff_settings, BreakoutStateStore(persist=False))
+    lookback = max(int(eff_settings.lookback_bars), 80)
+    slow_need = max(sma_map.values()) if sma_map else eff_settings.sma_slow
     start_i = max(
         lookback,
-        settings.sma_slow + 1,
-        settings.bb_period + 25,
-        settings.adx_period * 2 + 2,
+        slow_need + 1,
+        eff_settings.bb_period + 25,
+        eff_settings.adx_period * 2 + 2,
     )
     entries: list[int] = []
     in_pos_until = -1
     n = len(bars)
     htf_pos = 0
     htf_len = len(htf) if htf is not None and not htf.empty else 0
-    hold = policy_baseline(settings)
+    hold = exit_policy or policy_asymmetric(settings)
+    vol_mult = variant.volume_mult if variant else None
+    vol_period = int(variant.volume_period if variant else settings.volume_confirmation_period)
 
     for i in range(start_i, n):
         if i <= in_pos_until:
@@ -204,6 +255,8 @@ def precompute_entries(
         if filters.settings.entry_confirmation_enabled:
             if not filters.check_entry_confirmation(symbol, hist, htf_hist).allowed:
                 continue
+        if vol_mult is not None and not _entry_bar_volume_ok(bars, i, vol_period, vol_mult):
+            continue
         entries.append(i)
         entry_px = float(bars["open"].iloc[i])
         atr_e = last_atr(hist, settings.atr_period)
@@ -225,8 +278,66 @@ def precompute_entries(
                 exit_j = j
                 break
         in_pos_until = exit_j
-    print(f"{symbol} entries={len(entries)} (5Min multi-regimen)")
+    if not quiet:
+        tag = variant.name if variant else "default"
+        print(f"{symbol} [{tag}] entries={len(entries)} (5Min multi-regimen)")
     return entries
+
+
+def evaluate_variant_symbol(
+    settings: Settings,
+    bars: pd.DataFrame,
+    htf: pd.DataFrame,
+    symbol: str,
+    sma_slow_by_symbol: dict[str, int],
+    variant: EntryVariant | None,
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    fee_pct: float,
+    slippage_pct: float,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """IS + OOS con salidas asimétricas fijas."""
+    asym = policy_asymmetric(settings)
+    entries = precompute_entries(
+        settings,
+        symbol,
+        bars,
+        htf,
+        sma_slow_by_symbol,
+        variant=variant,
+        exit_policy=asym,
+        quiet=True,
+    )
+    cash0 = float(settings.backtest_cash)
+    is_end = OOS_START - pd.Timedelta(minutes=5)
+    is_trades = simulate_trades(
+        settings,
+        bars,
+        entries,
+        asym,
+        symbol=symbol,
+        fee_pct=fee_pct,
+        slippage_pct=slippage_pct,
+        period_start=start,
+        period_end=is_end,
+    )
+    oos_trades = simulate_trades(
+        settings,
+        bars,
+        entries,
+        asym,
+        symbol=symbol,
+        fee_pct=fee_pct,
+        slippage_pct=slippage_pct,
+        period_start=OOS_START,
+        period_end=end,
+    )
+    m_is = summarize_trades(is_trades, cash0)
+    m_oos = summarize_trades(oos_trades, cash0)
+    m_is["symbol"] = symbol
+    m_oos["symbol"] = symbol
+    return m_is, m_oos
 
 
 def simulate_trades(
