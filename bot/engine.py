@@ -233,16 +233,25 @@ class TradingEngine:
 
     def _crypto_asymmetric_exits(self, symbol: str) -> bool:
         s = self.settings
+        return is_crypto_symbol(symbol) and s.crypto_asymmetric_live_enabled
+
+    def _stock_asymmetric_exits(self, symbol: str) -> bool:
         return (
-            is_crypto_symbol(symbol)
-            and s.crypto_asymmetric_live_enabled
-            and not s.crypto_legacy_mtf_enabled
+            not is_crypto_symbol(symbol) and self.settings.stock_asymmetric_exits_enabled
         )
 
-    def _buy_entry_reason(self, symbol: str) -> str:
+    def _no_fixed_take_profit(self, symbol: str) -> bool:
+        return self._crypto_asymmetric_exits(symbol) or self._stock_asymmetric_exits(symbol)
+
+    def _buy_entry_reason(self, symbol: str, entry_strategy: str | None = None) -> str:
+        if entry_strategy:
+            return entry_strategy
         if self._crypto_asymmetric_exits(symbol):
             return "crypto_asymmetric_1h"
-        return "signal_6m"
+        return "signal_entry"
+
+    def _sell_signal_reason(self, symbol: str) -> str:
+        return "signal_exit"
 
     def run_once(self) -> None:
         """Ejecuta todas las capas una vez (modo --once)."""
@@ -258,14 +267,14 @@ class TradingEngine:
         open_n = len(self.executor.list_positions())
         logger.info(
             "Motor Tesla 3-6-9 | %s | activos=%s | acciones=%s | cripto=%s | tick=%ss | "
-            "capas 3m=%ss 6m=%ss 9m=%ss | dry_run=%s | SL=%.2f%% TP=%.2f%% | posiciones=%s",
+            "capas 3m=%ss entry=%ss 9m=%ss | dry_run=%s | SL=%.2f%% TP=%.2f%% | posiciones=%s",
             trading_mode_label(mode, self.settings.bot_profile),
             ",".join(active) or "—",
             ",".join(self.settings.stock_symbols),
             ",".join(self.settings.crypto_symbols),
             tick,
             self.settings.tf_3m_seconds,
-            self.settings.tf_6m_seconds,
+            self.settings.tf_entry_seconds,
             self.settings.tf_9m_seconds,
             self.executor.dry_run,
             self.settings.stop_loss_pct * 100,
@@ -328,7 +337,7 @@ class TradingEngine:
             self.settings.crypto_min_tp_pct * 100,
             self.settings.crypto_trend_pullback_rsi_max,
         )
-        if self.settings.bot_profile == "crypto" and not self.settings.crypto_legacy_mtf_enabled:
+        if self.settings.bot_profile == "crypto":
             if self.settings.crypto_asymmetric_live_enabled:
                 logger.info(
                     "Cripto asimétrico 1H/4H | LIVE ON | SL=%.2fx ATR | trail=%.2fx ATR "
@@ -339,7 +348,25 @@ class TradingEngine:
                 )
             else:
                 logger.warning(
-                    "Cripto entradas OFF — pipeline 6m/15m retirado; ver DEPRECATED_CRYPTO_6M.md"
+                    "Cripto entradas OFF — asimétrico 1H/4H apagado (CRYPTO_ASYMMETRIC_LIVE_ENABLED=false)"
+                )
+        if self.settings.bot_profile == "stocks":
+            if self.settings.stock_asymmetric_exits_enabled:
+                logger.info(
+                    "Acciones asimétrico | LIVE ON | SL=%.2fx ATR | trail=%.2fx ATR "
+                    "| breakeven max(%.2f%%, %.2fx ATR) | SIN TP fijo %%",
+                    self.settings.stock_asymmetric_sl_atr_mult,
+                    self.settings.stock_asymmetric_trail_atr_mult,
+                    self.settings.breakeven_activate_pct * 100,
+                    self.settings.breakeven_activate_atr_mult,
+                )
+            else:
+                logger.info(
+                    "Acciones salidas clásicas | entrada %s | SL=%.2fx ATR | trail=%.2fx ATR | piso TP=%.2f%%",
+                    self.settings.stock_entry_timeframe,
+                    self.settings.stock_atr_sl_mult,
+                    self.settings.atr_trailing_mult,
+                    self.settings.min_tp_pct * 100,
                 )
         logger.info(
             "Trailing 2 etapas | BE max(%.2f%%, %.1fx ATR) buffer=%.2fx ATR | "
@@ -1653,7 +1680,16 @@ class TradingEngine:
             logger.info("%s | señal=%s rechazada por flujo: %s", symbol, signal.value, flow_reason)
             if "spread" in flow_reason.lower():
                 self._queue_signal_after_reject(
-                    symbol, signal, position, qty, last_price, account, positions, atr_value, flow_reason
+                    symbol,
+                    signal,
+                    position,
+                    qty,
+                    last_price,
+                    account,
+                    positions,
+                    atr_value,
+                    flow_reason,
+                    entry_strategy=entry_strategy,
                 )
             return
 
@@ -1727,9 +1763,9 @@ class TradingEngine:
                 trail_mult_log,
             )
             audit("signal_buy", "allow", symbol=symbol, qty=decision.qty)
-            entry_reason = self._buy_entry_reason(symbol)
-            tp_price = 0.0 if self._crypto_asymmetric_exits(symbol) else levels.take_profit_price
-            tp_pct = 0.0 if self._crypto_asymmetric_exits(symbol) else levels.take_profit_pct
+            entry_reason = self._buy_entry_reason(symbol, entry_strategy)
+            tp_price = 0.0 if self._no_fixed_take_profit(symbol) else levels.take_profit_price
+            tp_pct = 0.0 if self._no_fixed_take_profit(symbol) else levels.take_profit_pct
             buy_event_id = self._event_id(symbol, "open", entry_reason)
             result = self._submit_order(
                 symbol,
@@ -1798,7 +1834,7 @@ class TradingEngine:
                 "buy",
                 decision.qty,
                 last_price,
-                "signal_6m",
+                entry_reason,
                 self.executor.dry_run,
                 stop_price=levels.stop_price,
                 take_profit_price=levels.take_profit_price,
@@ -1815,8 +1851,9 @@ class TradingEngine:
             if self._has_pending_close(symbol):
                 logger.info("%s | SELL omitido — cierre ya en cola de reintento", symbol)
                 return
+            exit_reason = self._sell_signal_reason(symbol)
             closed = self._close_and_report(
-                symbol, qty, float(position.avg_entry_price), last_price, "signal_6m"
+                symbol, qty, float(position.avg_entry_price), last_price, exit_reason
             )
             if closed:
                 positions.pop(symbol, None)
@@ -1873,14 +1910,17 @@ class TradingEngine:
         positions: dict,
         atr_value: float | None,
         flow_reason: str,
+        *,
+        entry_strategy: str | None = None,
     ) -> None:
         if signal is Signal.SELL and position is not None:
+            exit_reason = self._sell_signal_reason(symbol)
             self._queue_execution(
                 PendingExecution(
                     symbol=symbol,
                     side="sell",
                     qty=qty,
-                    reason="signal_6m",
+                    reason=exit_reason,
                     last_price=last_price,
                     entry_price=float(position.avg_entry_price),
                     is_close=True,
@@ -1889,7 +1929,7 @@ class TradingEngine:
                     event_id=self._event_id(
                         symbol,
                         "close",
-                        "signal_6m",
+                        exit_reason,
                         tracked=self.executor.position_book.get(symbol),
                     ),
                 )
@@ -1928,12 +1968,13 @@ class TradingEngine:
             levels.take_profit_pct * 100,
             f"{levels.trailing_offset:.4f}" if levels.trailing_offset else "pct_fallback",
         )
+        entry_reason = self._buy_entry_reason(symbol, entry_strategy)
         self._queue_execution(
             PendingExecution(
                 symbol=symbol,
                 side="buy",
                 qty=decision.qty,
-                reason="signal_6m",
+                reason=entry_reason,
                 last_price=last_price,
                 is_close=False,
                 last_error=flow_reason,
@@ -1942,7 +1983,7 @@ class TradingEngine:
                 stop_pct=levels.stop_pct,
                 take_profit_pct=levels.take_profit_pct,
                 signal_price=last_price,
-                event_id=self._event_id(symbol, "open", "signal_6m"),
+                event_id=self._event_id(symbol, "open", entry_reason),
             )
         )
 

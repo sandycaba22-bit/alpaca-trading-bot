@@ -1,4 +1,4 @@
-"""Análisis por capa Tesla 3-6-9: spike 3m → señal 6m → macro/tendencia 9m."""
+"""Análisis por capas: spike 3m → señal entrada → macro/tendencia 9m."""
 
 from __future__ import annotations
 

@@ -151,7 +151,8 @@ class TelegramNotifier:
         reason_label = {
             "stop_loss": "Stop Loss",
             "take_profit": "Take Profit",
-            "signal_6m": "Señal contraria (venta)",
+            "signal_entry": "Señal de entrada",
+            "signal_exit": "Señal contraria (venta)",
             "mode_switch": "Cambio de mercado",
             "dynamic_tp_limit": "TP límite alcanzado",
             "dynamic_tp_gap_market": "Gap — venta parcial a mercado",
@@ -189,7 +190,8 @@ class TelegramNotifier:
         reason_label = {
             "stop_loss": "Stop Loss",
             "take_profit": "Take Profit",
-            "signal_6m": "Señal contraria (venta)",
+            "signal_entry": "Señal de entrada",
+            "signal_exit": "Señal contraria (venta)",
             "mode_switch": "Cambio de mercado",
             "dynamic_tp_limit": "TP límite alcanzado",
             "dynamic_tp_gap_market": "Gap — venta parcial a mercado",

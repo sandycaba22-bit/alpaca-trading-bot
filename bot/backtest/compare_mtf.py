@@ -1,4 +1,4 @@
-"""Comparación 6 años: estructura actual (6m+9m) vs nueva (5m+15m confirmación SMA)."""
+"""Comparación 6 años: entrada 5m + confirmación SMA 15m (producción acciones)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from bot.storage.breakout_state import BreakoutStateStore
 
 logger = logging.getLogger(__name__)
 
-BASELINE_SMA_6M: dict[str, tuple[int, int]] = {
+ENTRY_SMA_BY_SYMBOL: dict[str, tuple[int, int]] = {
     "AAPL": (15, 30),
     "MSFT": (10, 30),
     "BTC/USD": (9, 21),
@@ -30,17 +30,13 @@ BASELINE_SMA_6M: dict[str, tuple[int, int]] = {
 }
 
 
-def _scale_period(period: int, *, from_min: int = 6, to_min: int = 5) -> int:
-    return max(2, round(period * from_min / to_min))
-
-
-def _sma_5m(symbol: str) -> tuple[int, int]:
-    fast, slow = BASELINE_SMA_6M.get(symbol.upper(), (15, 30))
-    return _scale_period(fast), _scale_period(slow)
-
-
-def _periods_5m(settings: Settings) -> tuple[int, int]:
-    return _scale_period(settings.atr_period), _scale_period(settings.adx_period)
+def _entry_sma(symbol: str, settings: Settings) -> tuple[int, int]:
+    key = symbol.upper()
+    if key in ENTRY_SMA_BY_SYMBOL:
+        return ENTRY_SMA_BY_SYMBOL[key]
+    if is_crypto_symbol(symbol):
+        return settings.crypto_sma_fast, settings.crypto_sma_slow
+    return settings.sma_fast, settings.sma_slow
 
 
 @dataclass(frozen=True)
@@ -69,40 +65,16 @@ class MtfCompareRow:
     sharpe: float
 
 
-def baseline_spec(settings: Settings) -> MtfStructureSpec:
-    by_symbol = dict(BASELINE_SMA_6M)
-    for sym in settings.crypto_symbols:
-        key = sym.upper()
-        if key not in by_symbol:
-            by_symbol[key] = (settings.crypto_sma_fast, settings.crypto_sma_slow)
-    for sym in settings.stock_symbols:
-        key = sym.upper()
-        if key not in by_symbol:
-            by_symbol[key] = (settings.sma_fast, settings.sma_slow)
+def production_spec(settings: Settings) -> MtfStructureSpec:
+    by_symbol = {sym.upper(): _entry_sma(sym, settings) for sym in all_symbols(settings)}
     return MtfStructureSpec(
-        label="baseline_6m_9m",
-        entry_tf="6Min",
-        trend_tf="9Min",
-        confirm_tf=None,
-        sma_by_symbol=by_symbol,
-        atr_period=settings.atr_period,
-        adx_period=settings.adx_period,
-        use_9m_trend=True,
-        use_15m_confirm=False,
-    )
-
-
-def proposed_spec(settings: Settings) -> MtfStructureSpec:
-    by_symbol = {sym.upper(): _sma_5m(sym) for sym in all_symbols(settings)}
-    atr_p, adx_p = _periods_5m(settings)
-    return MtfStructureSpec(
-        label="proposed_5m_15m",
+        label="entry_5m_15m",
         entry_tf="5Min",
         trend_tf=None,
         confirm_tf="15Min",
         sma_by_symbol=by_symbol,
-        atr_period=atr_p,
-        adx_period=adx_p,
+        atr_period=settings.atr_period,
+        adx_period=settings.adx_period,
         use_9m_trend=False,
         use_15m_confirm=True,
     )
@@ -383,7 +355,7 @@ def _fetch_bars(
 
 def run_mtf_compare(settings: Settings, market_data: MarketDataService) -> list[MtfCompareRow]:
     years = settings.backtest_years
-    specs = (baseline_spec(settings), proposed_spec(settings))
+    specs = (production_spec(settings),)
     rows: list[MtfCompareRow] = []
     symbols = all_symbols(settings)
     bar_cache: dict[tuple[str, str], pd.DataFrame] = {}
@@ -440,7 +412,7 @@ def run_mtf_compare(settings: Settings, market_data: MarketDataService) -> list[
 
 def aggregate_rows(rows: list[MtfCompareRow]) -> dict[str, dict[str, float]]:
     out: dict[str, dict[str, float]] = {}
-    for structure in ("baseline_6m_9m", "proposed_5m_15m"):
+    for structure in ("entry_5m_15m",):
         subset = [r for r in rows if r.structure == structure]
         if not subset:
             continue
@@ -463,8 +435,7 @@ def aggregate_rows(rows: list[MtfCompareRow]) -> dict[str, dict[str, float]]:
 def format_mtf_report(rows: list[MtfCompareRow]) -> str:
     lines = [
         "=== COMPARATIVA MULTI-TIMEFRAME (6 años) ===",
-        "Baseline: entrada 6Min + filtro tendencia 9Min (sin confirmación 15Min)",
-        "Propuesta: entrada 5Min + confirmación SMA tendencia 15Min",
+        "Producción acciones: entrada 5Min + confirmación SMA tendencia 15Min",
         "",
         f"{'Estructura':<20} {'Símbolo':<10} {'Trades':>7} {'Win%':>7} {'MaxDD%':>8} {'Descart.':>10}",
         "-" * 70,
@@ -477,10 +448,7 @@ def format_mtf_report(rows: list[MtfCompareRow]) -> str:
         )
     agg = aggregate_rows(rows)
     lines.extend(["", "=== TOTALES (4 símbolos) ==="])
-    for key, label in (
-        ("baseline_6m_9m", "Baseline 6m+9m"),
-        ("proposed_5m_15m", "Propuesta 5m+15m"),
-    ):
+    for key, label in (("entry_5m_15m", "Entrada 5m+15m"),):
         if key not in agg:
             continue
         a = agg[key]
@@ -492,8 +460,7 @@ def format_mtf_report(rows: list[MtfCompareRow]) -> str:
     lines.extend(
         [
             "",
-            "Períodos 5m recalibrados (6m×6/5):",
-            "  AAPL 18/36 | MSFT 12/36 | BTC/ETH 11/25 | ATR/ADX period 17",
+            "SMA entrada: AAPL 15/30 | MSFT 10/30 | BTC/ETH según env o tabla ENTRY_SMA_BY_SYMBOL",
         ]
     )
     return "\n".join(lines)

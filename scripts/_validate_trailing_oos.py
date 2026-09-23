@@ -48,7 +48,7 @@ SCHEMES: list[tuple[str, float | None, float | None, bool]] = [
 
 
 def _entry_tf(symbol: str) -> str:
-    return "6Min" if is_crypto_symbol(symbol) else "5Min"
+    return "15Min" if is_crypto_symbol(symbol) else "5Min"
 
 
 def _cache_path(symbol: str, tf: str) -> Path:

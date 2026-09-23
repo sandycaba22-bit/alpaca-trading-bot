@@ -53,7 +53,8 @@ class Settings:
     poll_interval_seconds: int
     scheduler_tick_seconds: int
     tf_3m_seconds: int
-    tf_6m_seconds: int
+    tf_entry_seconds: int
+    stock_entry_timeframe: str
     tf_9m_seconds: int
     tf_spike_threshold_pct: float
     tf_macro_strong_pct: float
@@ -131,8 +132,6 @@ class Settings:
     crypto_squeeze_volume_mult: float = 1.35
     crypto_breakout_volume_mult: float = 1.25
     crypto_trend_pullback_allow_sideways: bool = True
-    # Legacy 6m/15m cripto — DEPRECATED (ver bot/strategy/DEPRECATED_CRYPTO_6M.md)
-    crypto_legacy_mtf_enabled: bool = False
     # Live/paper cripto asimétrico 1H/4H — solo true tras backtest IS+OOS positivo
     crypto_asymmetric_live_enabled: bool = False
     crypto_asymmetric_breakout_lookback: int = 20
@@ -146,6 +145,10 @@ class Settings:
     crypto_asymmetric_trail_activate_atr_mult: float = 1.25
     crypto_asymmetric_double_breakout: bool = False
     crypto_asymmetric_tick_seconds: int = 3600
+    # Salidas asimétricas acciones (SL ATR ceñido, trailing ancho, sin TP fijo %) — live tras backtest
+    stock_asymmetric_exits_enabled: bool = False
+    stock_asymmetric_sl_atr_mult: float = 1.2
+    stock_asymmetric_trail_atr_mult: float = 2.75
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
     stock_trade_best_only: bool = False
     stock_entry_score_min: float = 44.0
@@ -405,7 +408,10 @@ def load_settings(env_path: Path | None = None) -> Settings:
             name="SCHEDULER_TICK_SECONDS",
         ),
         tf_3m_seconds=bounded_int(os.getenv("TF_3M_SECONDS"), 180, min_value=60, max_value=900, name="TF_3M_SECONDS"),
-        tf_6m_seconds=bounded_int(os.getenv("TF_6M_SECONDS"), 360, min_value=120, max_value=1800, name="TF_6M_SECONDS"),
+        tf_entry_seconds=bounded_int(
+            os.getenv("TF_ENTRY_SECONDS"), 300, min_value=120, max_value=1800, name="TF_ENTRY_SECONDS"
+        ),
+        stock_entry_timeframe=sanitize_timeframe(os.getenv("STOCK_ENTRY_TIMEFRAME"), "5Min"),
         tf_9m_seconds=bounded_int(os.getenv("TF_9M_SECONDS"), 540, min_value=180, max_value=3600, name="TF_9M_SECONDS"),
         tf_spike_threshold_pct=bounded_float(
             os.getenv("TF_SPIKE_THRESHOLD_PCT"), 0.005, min_value=0.001, max_value=0.05, name="TF_SPIKE_THRESHOLD_PCT"
@@ -736,7 +742,6 @@ def load_settings(env_path: Path | None = None) -> Settings:
             os.getenv("CRYPTO_TREND_PULLBACK_ALLOW_SIDEWAYS"),
             default=True,
         ),
-        crypto_legacy_mtf_enabled=_as_bool(os.getenv("CRYPTO_LEGACY_MTF_ENABLED"), default=False),
         crypto_asymmetric_live_enabled=_as_bool(
             os.getenv("CRYPTO_ASYMMETRIC_LIVE_ENABLED"), default=False
         ),
@@ -812,6 +817,23 @@ def load_settings(env_path: Path | None = None) -> Settings:
             min_value=300,
             max_value=86400,
             name="CRYPTO_ASYMMETRIC_TICK_SECONDS",
+        ),
+        stock_asymmetric_exits_enabled=_as_bool(
+            os.getenv("STOCK_ASYMMETRIC_EXITS_ENABLED"), default=False
+        ),
+        stock_asymmetric_sl_atr_mult=bounded_float(
+            os.getenv("STOCK_ASYMMETRIC_SL_ATR_MULT"),
+            1.2,
+            min_value=0.5,
+            max_value=3.0,
+            name="STOCK_ASYMMETRIC_SL_ATR_MULT",
+        ),
+        stock_asymmetric_trail_atr_mult=bounded_float(
+            os.getenv("STOCK_ASYMMETRIC_TRAIL_ATR_MULT"),
+            2.75,
+            min_value=1.5,
+            max_value=6.0,
+            name="STOCK_ASYMMETRIC_TRAIL_ATR_MULT",
         ),
         stock_trade_best_only=_as_bool(os.getenv("STOCK_TRADE_BEST_ONLY"), default=False),
         stock_entry_score_min=_resolve_profile_entry_score_min(

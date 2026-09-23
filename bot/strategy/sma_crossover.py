@@ -10,7 +10,7 @@ from bot.strategy.base import Signal, Strategy, StrategyContext
 
 logger = logging.getLogger(__name__)
 
-# Gatillo 6m rápido (no sustituye el SMA lento; solo entra si la tendencia 9m acompaña).
+# Impulso en TF de entrada (no sustituye el SMA lento; solo entra si la tendencia HTF acompaña).
 IMPULSE_EMA_FAST = 5
 IMPULSE_EMA_SLOW = 13
 IMPULSE_RSI_PERIOD = 7
@@ -37,9 +37,9 @@ def generate_impulse_signal(
     trend: str,
 ) -> tuple[Signal, str]:
     """
-    Disparador 6m alternativo: EMA 5/13, cruce RSI o aceleración de precio.
+    Disparador de impulso: EMA 5/13, cruce RSI o aceleración de precio.
 
-    Solo dispara si la tendencia 9m acompaña (bull → BUY, bear → SELL).
+    Solo dispara si la tendencia HTF acompaña (bull → BUY, bear → SELL).
     """
     trend_n = str(trend or "").strip().lower()
     min_bars = max(IMPULSE_EMA_SLOW, IMPULSE_RSI_PERIOD, IMPULSE_ACCEL_BARS) + 2
@@ -70,20 +70,20 @@ def generate_impulse_signal(
 
     if trend_n == "bull" and not has_long and (ema_golden or rsi_up or accel_up):
         if ema_golden:
-            why = "impulso 6m EMA5/13 golden"
+            why = "impulso EMA5/13 golden"
         elif rsi_up:
-            why = f"impulso 6m RSI{IMPULSE_RSI_PERIOD} cruza {IMPULSE_RSI_BUY:.0f}"
+            why = f"impulso RSI{IMPULSE_RSI_PERIOD} cruza {IMPULSE_RSI_BUY:.0f}"
         else:
-            why = f"impulso 6m aceleracion {accel:+.2%}"
+            why = f"impulso aceleracion {accel:+.2%}"
         return Signal.BUY, why
 
     if trend_n == "bear" and has_long and (ema_death or rsi_down or accel_down):
         if ema_death:
-            why = "impulso 6m EMA5/13 death"
+            why = "impulso EMA5/13 death"
         elif rsi_down:
-            why = f"impulso 6m RSI{IMPULSE_RSI_PERIOD} cruza {IMPULSE_RSI_SELL:.0f}"
+            why = f"impulso RSI{IMPULSE_RSI_PERIOD} cruza {IMPULSE_RSI_SELL:.0f}"
         else:
-            why = f"impulso 6m aceleracion {accel:+.2%}"
+            why = f"impulso aceleracion {accel:+.2%}"
         return Signal.SELL, why
 
     return Signal.HOLD, ""
@@ -141,8 +141,7 @@ class SmaCrossoverStrategy(Strategy):
             logger.info("%s | cruce bajista (death cross) -> SELL", ctx.symbol)
             return Signal.SELL
 
-        # Alternativa 6m: EMA/RSI/aceleración. La capa 6m pasa tendencia 9m vía
-        # generate_impulse_signal; aquí se mantiene el SMA lento si no hay cruce.
+        # Impulso EMA/RSI/aceleración (HTF vía generate_impulse_signal); si no hay cruce SMA, HOLD.
         return Signal.HOLD
 
     @staticmethod

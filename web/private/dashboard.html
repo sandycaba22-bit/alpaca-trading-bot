@@ -33,7 +33,7 @@
         </section>
 
         <section class="grid" id="metrics"></section>
-        <div id="scheduler-layers" class="scheduler-layers muted">Ciclos Tesla 3-6-9: esperando datos del bot...</div>
+        <div id="scheduler-layers" class="scheduler-layers muted">Capas del planificador: esperando datos del bot...</div>
         <p id="refresh-msg" class="muted refresh-msg">Sincronizacion automatica cada 15 min · deteccion de cambio de mercado cada 60 s</p>
         <p id="strategy-msg" class="muted"></p>
 
@@ -44,8 +44,8 @@
                 <select id="symbol-select"></select>
                 <label for="tf-select">Velas</label>
                 <select id="tf-select">
-                    <option value="6Min">6 min (Tesla)</option>
-                    <option value="9Min">9 min (Tesla)</option>
+                    <option value="5Min">5 min (entrada acciones)</option>
+                    <option value="9Min">9 min (macro acciones)</option>
                     <option value="15Min" selected>15 min</option>
                     <option value="1Hour">1 hora</option>
                     <option value="1Day">1 dia</option>
@@ -108,7 +108,7 @@
         };
 
         function defaultTimeframeForMode(mode) {
-            return mode === 'crypto' ? '6Min' : '15Min';
+            return mode === 'crypto' ? '1Hour' : '5Min';
         }
 
         function syncSymbolSelect(data) {
@@ -397,7 +397,7 @@
                 const row = scheduler.layers[name];
                 const mins = Math.round((row.interval_seconds || 0) / 60);
                 const next = row.next_in_seconds != null ? row.next_in_seconds + 's' : '—';
-                const label = name === '3m' ? 'Rapido' : name === '6m' ? 'Senales' : 'Macro';
+                const label = name === '3m' ? 'Rapido' : name === 'entry' ? 'Senales' : name === '1h' ? '1H asim' : 'Macro';
                 return '<span class="layer-chip"><strong>' + name + '</strong> ' + label
                     + ' · cada ' + mins + 'm · prox ' + next + '</span>';
             });

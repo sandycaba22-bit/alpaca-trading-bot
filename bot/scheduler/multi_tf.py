@@ -46,14 +46,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-LAYER_NAMES = ("3m", "6m", "9m")
+LAYER_NAMES = ("3m", "entry", "9m")
 CRYPTO_SYMBOL_QUERY_DELAY_SECONDS = 1.0
 
 _TF_SECONDS = {
     "1Min": 60,
     "3Min": 180,
     "5Min": 300,
-    "6Min": 360,
     "9Min": 540,
     "15Min": 900,
     "30Min": 1800,
@@ -80,7 +79,7 @@ class LayerScheduler:
             tick_seconds=settings.scheduler_tick_seconds,
             intervals={
                 "3m": settings.tf_3m_seconds,
-                "6m": settings.tf_6m_seconds,
+                "entry": settings.tf_entry_seconds,
                 "9m": settings.tf_9m_seconds,
             },
         )
@@ -118,7 +117,7 @@ class SymbolLayerCache:
 
 
 @dataclass
-class Symbol6mScan:
+class SymbolEntryScan:
     bars: object
     tape: object
     last_price: float
@@ -146,7 +145,7 @@ class SchedulerStateStore:
         now = time.monotonic()
         payload = {
             "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-            "schedule": "tesla-3-6-9",
+            "schedule": "tesla-3-entry-9",
             "trading_mode": trading_mode,
             "trading_mode_label": trading_mode_label,
             "active_symbols": active_symbols or [],
@@ -157,7 +156,7 @@ class SchedulerStateStore:
                     "interval_seconds": scheduler.intervals[name],
                     "next_in_seconds": scheduler.seconds_until(name, now),
                 }
-                for name in LAYER_NAMES
+                for name in scheduler.intervals
             },
             "symbols": {
                 sym: {
@@ -217,13 +216,14 @@ class MultiTimeframeEngine:
         self._crypto_trades_day: str = ""
         self._crypto_trades_count: int = 0
         if profile == "crypto":
-            self.scheduler.intervals["1h"] = int(engine.settings.crypto_asymmetric_tick_seconds)
+            tick_1h = int(engine.settings.crypto_asymmetric_tick_seconds)
+            self.scheduler.intervals = {"1h": tick_1h}
 
-    def _crypto_profile_no_legacy(self) -> bool:
+    def _crypto_runtime(self) -> bool:
         settings = self.engine.settings
-        if settings.bot_profile != "crypto" and self.trading_mode is not TradingMode.CRYPTO:
-            return False
-        return not settings.crypto_legacy_mtf_enabled
+        if settings.bot_profile == "crypto":
+            return True
+        return settings.bot_profile == "hybrid" and self.trading_mode is TradingMode.CRYPTO
 
     def _stocks_market_dormant(self, clock) -> bool:
         return (
@@ -236,7 +236,7 @@ class MultiTimeframeEngine:
         self._apply_trading_mode(clock)
         self._sync_intervals_for_mode()
         now = time.monotonic()
-        for layer in LAYER_NAMES:
+        for layer in self.scheduler.intervals:
             self.scheduler.last_run[layer] = now - self.scheduler.intervals[layer]
         self._persist()
 
@@ -256,7 +256,7 @@ class MultiTimeframeEngine:
             now_mono = time.monotonic()
             if now_mono - self._last_dormant_log_at >= 3600.0:
                 logger.info(
-                    "Mercado US cerrado — bot acciones en reposo (sin escaneo 3-6-9; cripto sigue en su proceso)"
+                    "Mercado US cerrado — bot acciones en reposo (sin escaneo de capas; cripto sigue en su proceso)"
                 )
                 self._last_dormant_log_at = now_mono
             if positions_by_symbol(engine.executor.list_positions()):
@@ -264,15 +264,15 @@ class MultiTimeframeEngine:
             self._persist()
             return
 
-        if self._crypto_profile_no_legacy():
+        if self._crypto_runtime():
             engine._mark_all_positions()
             now_mono = time.monotonic()
             settings = engine.settings
             if not settings.crypto_asymmetric_live_enabled:
                 if now_mono - self._last_dormant_log_at >= 3600.0:
                     logger.warning(
-                        "Cripto sin entradas — pipeline 6m/15m RETIRADO (ver DEPRECATED_CRYPTO_6M.md). "
-                        "Backtest IS+OOS positivo requerido para CRYPTO_ASYMMETRIC_LIVE_ENABLED=true"
+                        "Cripto sin entradas — asimétrico 1H/4H apagado "
+                        "(CRYPTO_ASYMMETRIC_LIVE_ENABLED=false). Backtest IS+OOS positivo requerido."
                     )
                     self._last_dormant_log_at = now_mono
             elif self.scheduler.due("1h", now_mono):
@@ -282,15 +282,15 @@ class MultiTimeframeEngine:
 
         now = time.monotonic()
         run_3m = self.scheduler.due("3m", now)
-        run_6m = self.scheduler.due("6m", now)
+        run_entry = self.scheduler.due("entry", now)
         run_9m = self.scheduler.due("9m", now)
 
         if run_9m:
             self._layer_9m()
         if run_3m:
             self._layer_3m()
-        if run_6m:
-            self._layer_6m_execute()
+        if run_entry:
+            self._layer_entry_execute()
         elif run_3m:
             stream = engine._stream
             if stream is None or stream.health.in_fallback():
@@ -362,13 +362,13 @@ class MultiTimeframeEngine:
                 logger.debug("%s | capa 9m fallo: %s", symbol, exc)
             self._sleep_between_crypto_symbols(symbols, index)
 
-    def _layer_6m_execute(self) -> None:
+    def _layer_entry_execute(self) -> None:
         engine = self.engine
         clock = engine.client.get_market_clock()
         account = engine.client.snapshot_account_optional()
         if account is None:
             logger.warning(
-                "Capa 6m sin snapshot de cuenta — se mantienen mark-to-market y cierres, "
+                "Capa entrada sin snapshot de cuenta — se mantienen mark-to-market y cierres, "
                 "pero las nuevas compras quedan bloqueadas hasta recuperar cuenta o cache"
             )
         positions = positions_by_symbol(engine.executor.list_positions())
@@ -387,20 +387,20 @@ class MultiTimeframeEngine:
 
         positions = positions_by_symbol(engine.executor.list_positions())
         active_symbols = list(self.active_symbols)
-        scans: dict[str, Symbol6mScan] = {}
+        scans: dict[str, SymbolEntryScan] = {}
         for index, symbol in enumerate(active_symbols):
             if engine.control.is_paused():
                 return
             if not is_symbol_tradable(symbol, clock):
                 continue
             try:
-                scan = self._scan_6m_symbol(symbol, positions)
+                scan = self._scan_entry_symbol(symbol, positions)
                 if scan is not None:
                     scans[symbol] = scan
             except RateLimitError as exc:
-                logger.warning("%s | capa 6m rate limit — se continúa con el resto | %s", symbol, exc)
+                logger.warning("%s | capa entrada rate limit — se continúa con el resto | %s", symbol, exc)
             except Exception as exc:
-                logger.warning("%s | capa 6m fallo: %s", symbol, exc)
+                logger.warning("%s | capa entrada fallo: %s", symbol, exc)
             self._sleep_between_crypto_symbols(active_symbols, index)
 
         focus_symbol = self._pick_focus_symbol(active_symbols)
@@ -421,7 +421,7 @@ class MultiTimeframeEngine:
             if symbol not in scans:
                 continue
             try:
-                self._execute_6m_symbol(
+                self._execute_entry_symbol(
                     symbol,
                     account,
                     positions,
@@ -429,9 +429,9 @@ class MultiTimeframeEngine:
                     focus_symbol=focus_symbol,
                 )
             except RateLimitError as exc:
-                logger.warning("%s | capa 6m rate limit — se continúa con el resto | %s", symbol, exc)
+                logger.warning("%s | capa entrada rate limit — se continúa con el resto | %s", symbol, exc)
             except Exception as exc:
-                logger.warning("%s | capa 6m fallo: %s", symbol, exc)
+                logger.warning("%s | capa entrada fallo: %s", symbol, exc)
             self._sleep_between_crypto_symbols(active_symbols, index)
 
     def _focus_best_only_enabled(self) -> bool:
@@ -493,7 +493,7 @@ class MultiTimeframeEngine:
             return True
         return False
 
-    def _scan_6m_symbol(self, symbol: str, positions: dict) -> Symbol6mScan | None:
+    def _scan_entry_symbol(self, symbol: str, positions: dict) -> SymbolEntryScan | None:
         engine = self.engine
         cache = self.cache[symbol]
         signal_tf = self._signal_timeframe(symbol)
@@ -540,7 +540,7 @@ class MultiTimeframeEngine:
         entry_strategy = last_strategy.value if last_strategy is not None else None
         score_log = f" | {cache.entry_score_detail}" if cache.entry_score_detail else ""
         logger.info(
-            "%s | eval 6m | señal=%s | detalle=%s | precio=%.4f | spread=%s | htf=%s | posicion=%s%s",
+            "%s | eval entrada | señal=%s | detalle=%s | precio=%.4f | spread=%s | htf=%s | posicion=%s%s",
             symbol,
             signal.value,
             detail,
@@ -550,7 +550,7 @@ class MultiTimeframeEngine:
             "sí" if position is not None else "no",
             score_log,
         )
-        return Symbol6mScan(
+        return SymbolEntryScan(
             bars=bars,
             tape=tape,
             last_price=last_price,
@@ -560,12 +560,12 @@ class MultiTimeframeEngine:
             entry_strategy=entry_strategy,
         )
 
-    def _execute_6m_symbol(
+    def _execute_entry_symbol(
         self,
         symbol: str,
         account,
         positions: dict,
-        scan: Symbol6mScan,
+        scan: SymbolEntryScan,
         focus_symbol: str | None = None,
     ) -> None:
         engine = self.engine
@@ -611,7 +611,7 @@ class MultiTimeframeEngine:
             return
 
         if signal is Signal.HOLD:
-            logger.info("%s | HOLD 6m | %s", symbol, detail)
+            logger.info("%s | HOLD entrada | %s", symbol, detail)
             return
 
         score_min = entry_score_min_for(settings, symbol)
@@ -691,7 +691,7 @@ class MultiTimeframeEngine:
         self._apply_trading_mode(clock)
         self._layer_9m()
         self._layer_3m()
-        self._layer_6m_execute()
+        self._layer_entry_execute()
         self._persist()
 
     def _apply_trading_mode(self, clock) -> None:
@@ -744,7 +744,7 @@ class MultiTimeframeEngine:
         self._crypto_trades_count += 1
 
     def _layer_crypto_asymmetric(self) -> None:
-        """Entrada 1H + confirmación 4H — reemplazo del pipeline 6m (legacy apagado)."""
+        """Entrada cripto asimétrica 1H + confirmación 4H."""
         engine = self.engine
         settings = engine.settings
         params = params_from_settings(settings)
@@ -789,7 +789,7 @@ class MultiTimeframeEngine:
                 cache.entry_score = float(entry_score_min_for(settings, symbol)) + 15.0
                 cache.entry_score_detail = "asim 1H/4H"
                 tape = engine.live_tape(symbol, fallback_price=last_price)
-                scan = Symbol6mScan(
+                scan = SymbolEntryScan(
                     bars=bars_1h,
                     tape=tape,
                     last_price=last_price,
@@ -798,7 +798,7 @@ class MultiTimeframeEngine:
                     last_sl_mult=settings.crypto_asymmetric_sl_atr_mult,
                     entry_strategy="crypto_asymmetric_1h",
                 )
-                self._execute_6m_symbol(
+                self._execute_entry_symbol(
                     symbol,
                     account,
                     positions,
@@ -815,7 +815,7 @@ class MultiTimeframeEngine:
     def _signal_timeframe(self, symbol: str) -> str:
         if is_crypto_symbol(symbol):
             return self.engine.settings.crypto_bar_timeframe
-        return "6Min"
+        return self.engine.settings.stock_entry_timeframe
 
     def _spike_timeframe(self, symbol: str) -> str:
         if is_crypto_symbol(symbol):
@@ -849,18 +849,13 @@ class MultiTimeframeEngine:
         time.sleep(CRYPTO_SYMBOL_QUERY_DELAY_SECONDS)
 
     def _sync_intervals_for_mode(self, *, reset: bool = False) -> None:
-        if self.trading_mode is TradingMode.CRYPTO:
-            intervals = {
-                "3m": _timeframe_seconds(self.engine.settings.crypto_bar_timeframe),
-                "6m": _timeframe_seconds(self.engine.settings.crypto_bar_timeframe),
-                "9m": _timeframe_seconds(self.engine.settings.crypto_regime_timeframe),
-            }
-        else:
-            intervals = {
-                "3m": self.engine.settings.tf_3m_seconds,
-                "6m": self.engine.settings.tf_6m_seconds,
-                "9m": self.engine.settings.tf_9m_seconds,
-            }
+        settings = self.engine.settings
+        entry_secs = _timeframe_seconds(settings.stock_entry_timeframe)
+        intervals = {
+            "3m": settings.tf_3m_seconds,
+            "entry": max(settings.tf_entry_seconds, entry_secs),
+            "9m": settings.tf_9m_seconds,
+        }
         changed = intervals != self.scheduler.intervals
         self.scheduler.intervals = intervals
         if reset or changed:

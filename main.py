@@ -72,7 +72,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--compare-mtf",
         action="store_true",
-        help="Compara estructura 6m+9m vs 5m+15m (6 anos, SMA crossover, no opera)",
+        help="Compara entrada 5m+15m (6 anos, SMA crossover, no opera)",
     )
     return parser.parse_args(argv)
 

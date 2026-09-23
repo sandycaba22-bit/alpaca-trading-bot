@@ -1,4 +1,4 @@
-"""Sweep trailing 2 etapas (solo ATR) en TF de producción: 6m cripto / 5m acciones + confirm 15m."""
+"""Sweep trailing 2 etapas (solo ATR) en TF de producción: 5m acciones + confirm 15m."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ YEARS = 6
 
 
 def _entry_tf(symbol: str) -> str:
-    return "6Min" if is_crypto_symbol(symbol) else "5Min"
+    return "15Min" if is_crypto_symbol(symbol) else "5Min"
 
 
 def _cache_path(symbol: str, tf: str) -> Path:
