@@ -11,8 +11,8 @@
     <main class="shell">
         <div class="top">
             <div>
-                <p class="eyebrow">Paper trading · no dinero real</p>
-                <h1>Panel de administracion</h1>
+                <p class="eyebrow" id="panel-eyebrow">Paper trading · no dinero real</p>
+                <h1 id="panel-title">Panel de administracion</h1>
             </div>
             <div class="actions">
                 <a class="btn btn-ghost" href="/api/logout">Cerrar sesion</a>
@@ -42,17 +42,11 @@
             <div class="chart-controls">
                 <label for="symbol-select">Simbolo</label>
                 <select id="symbol-select"></select>
-                <label for="tf-select">Velas</label>
-                <select id="tf-select">
-                    <option value="5Min">5 min (entrada acciones)</option>
-                    <option value="9Min">9 min (macro acciones)</option>
-                    <option value="15Min">15 min (entrada cripto)</option>
-                    <option value="30Min">30 min (macro cripto)</option>
-                    <option value="1Hour">1 hora</option>
-                    <option value="1Day">1 dia</option>
-                </select>
+                <label for="tf-select">Intervalo</label>
+                <select id="tf-select"></select>
             </div>
         </div>
+        <p id="chart-entry-hint" class="chart-entry-hint muted">Cargando configuracion del bot...</p>
         <div id="chart"></div>
         <p id="chart-msg" class="muted">Cargando velas de Alpaca...</p>
 
@@ -92,12 +86,26 @@
         </table>
     </main>
     <script>
+        const STOCK_CHART_TFS = ['5Min', '9Min', '15Min', '1Hour', '1Day'];
+        const CRYPTO_CHART_TFS = ['15Min', '30Min', '1Hour', '1Day'];
+        const TF_LABELS = {
+            '5Min': '5 min',
+            '9Min': '9 min',
+            '15Min': '15 min',
+            '30Min': '30 min',
+            '1Hour': '1 hora',
+            '1Day': '1 dia'
+        };
+
+        let lastDashboardData = null;
+
         const chartState = {
             chart: null,
             series: null,
             symbol: '',
-            timeframe: '15Min',
-            tradingMode: null
+            timeframe: '5Min',
+            panelProfile: 'stocks',
+            profileBound: null
         };
 
         const DashboardRefresh = {
@@ -109,18 +117,97 @@
             timers: []
         };
 
-        function defaultTimeframeForMode(mode) {
-            return mode === 'crypto' ? '1Hour' : '5Min';
+        function panelProfileFromData(data) {
+            return data.bot_profile === 'crypto' ? 'crypto' : 'stocks';
+        }
+
+        function entryTimeframeForProfile(data) {
+            const tf = data.timeframes || {};
+            if (panelProfileFromData(data) === 'crypto') {
+                return tf.crypto_bar_timeframe || '15Min';
+            }
+            return tf.stock_entry_timeframe || '5Min';
+        }
+
+        function applyPanelChrome(data) {
+            const profile = panelProfileFromData(data);
+            chartState.panelProfile = profile;
+            const title = document.getElementById('panel-title');
+            const eyebrow = document.getElementById('panel-eyebrow');
+            if (profile === 'crypto') {
+                title.textContent = 'Panel Cripto (sync_entry)';
+                eyebrow.textContent = 'Bot cripto · paper · puerto 3001';
+            } else {
+                title.textContent = 'Panel Acciones (sync_entry)';
+                eyebrow.textContent = 'Bot acciones · paper · puerto 3000';
+            }
+        }
+
+        function applyTfSelectForProfile(data) {
+            const profile = panelProfileFromData(data);
+            const tfInfo = data.timeframes || {};
+            const entryTf = entryTimeframeForProfile(data);
+            const regimeTf = profile === 'crypto'
+                ? (tfInfo.crypto_regime_timeframe || '30Min')
+                : (tfInfo.stock_regime_timeframe || '9Min');
+            const allowed = profile === 'crypto' ? CRYPTO_CHART_TFS : STOCK_CHART_TFS;
+            const select = document.getElementById('tf-select');
+            select.innerHTML = '';
+            allowed.forEach((tf) => {
+                const opt = document.createElement('option');
+                opt.value = tf;
+                let label = TF_LABELS[tf] || tf;
+                if (tf === entryTf) {
+                    label += ' — ENTRADA BOT ★';
+                } else if (tf === regimeTf) {
+                    label += ' — régimen sync';
+                } else if (tf === (tfInfo.stock_confirm_timeframe || tfInfo.confirm_higher_tf)) {
+                    label += ' — confirmación sync';
+                }
+                opt.textContent = label;
+                select.appendChild(opt);
+            });
+            if (!allowed.includes(chartState.timeframe)) {
+                chartState.timeframe = entryTf;
+            }
+            select.value = chartState.timeframe;
+            updateChartEntryHint(data);
+        }
+
+        function updateChartEntryHint(data) {
+            const el = document.getElementById('chart-entry-hint');
+            if (!el) return;
+            const profile = panelProfileFromData(data);
+            const tf = data.timeframes || {};
+            const entry = entryTimeframeForProfile(data);
+            const regime = profile === 'crypto'
+                ? (tf.crypto_regime_timeframe || '30Min')
+                : (tf.stock_regime_timeframe || '9Min');
+            const confirm = profile === 'crypto'
+                ? (tf.crypto_confirm_timeframe || tf.crypto_regime_timeframe || '30Min')
+                : (tf.stock_confirm_timeframe || tf.confirm_higher_tf || '15Min');
+            const tz = profile === 'crypto' ? 'UTC' : 'America/New_York (NYSE)';
+            const sync = data.sync_entry_enabled !== false ? 'sync_entry ON' : 'sync_entry OFF';
+            el.innerHTML = '<strong>Señales del bot:</strong> entrada <strong>' + entry + '</strong>'
+                + ' · régimen <strong>' + regime + '</strong>'
+                + ' · confirmación <strong>' + confirm + '</strong>'
+                + ' · ' + sync
+                + ' · gráfico en <strong>' + tz + '</strong>'
+                + ' · velas <strong>cerradas</strong> (igual que evalúa el bot).'
+                + ' Elige ★ para ver exactamente la capa de entrada.';
         }
 
         function syncSymbolSelect(data) {
+            applyPanelChrome(data);
+            applyTfSelectForProfile(data);
             const select = document.getElementById('symbol-select');
-            const active = data.active_symbols || [];
-            const all = data.all_symbols || data.symbols || [];
-            const pool = active.length ? active : all;
-            const mode = data.trading_mode || 'stocks';
-            const modeChanged = chartState.tradingMode !== null && chartState.tradingMode !== mode;
+            const profile = panelProfileFromData(data);
+            const pool = profile === 'crypto'
+                ? (data.crypto_symbols || [])
+                : (data.stock_symbols || data.symbols || []);
+            const profileChanged = chartState.profileBound !== profile;
             const prev = select.value;
+            const entryTf = entryTimeframeForProfile(data);
 
             select.innerHTML = '';
             pool.forEach((sym) => {
@@ -130,9 +217,13 @@
                 select.appendChild(opt);
             });
 
-            let needChart = modeChanged;
+            let needChart = profileChanged;
+            if (profileChanged) {
+                chartState.timeframe = entryTf;
+                document.getElementById('tf-select').value = entryTf;
+            }
             if (pool.length) {
-                if (!pool.includes(prev) || modeChanged || !chartState.symbol) {
+                if (!pool.includes(prev) || profileChanged || !chartState.symbol) {
                     select.value = pool[0];
                     chartState.symbol = pool[0];
                     needChart = true;
@@ -142,14 +233,21 @@
                 }
             }
 
-            if (modeChanged) {
-                const tf = defaultTimeframeForMode(mode);
-                chartState.timeframe = tf;
-                document.getElementById('tf-select').value = tf;
-            }
-
-            chartState.tradingMode = mode;
+            chartState.profileBound = profile;
             return needChart;
+        }
+
+        function formatChartTime(unixSec, profile) {
+            const tz = profile === 'crypto' ? 'UTC' : 'America/New_York';
+            const d = new Date(unixSec * 1000);
+            return d.toLocaleString('es-DO', {
+                timeZone: tz,
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            });
         }
 
         function updateRefreshMessage() {
@@ -325,8 +423,18 @@
         function sideLabel(side) {
             return side === 'buy' ? 'COMPRA' : side === 'sell' ? 'VENTA' : side;
         }
+        function chartLocalization() {
+            const profile = chartState.panelProfile || 'stocks';
+            return {
+                timeFormatter: (time) => formatChartTime(time, profile)
+            };
+        }
+
         function ensureChart() {
-            if (chartState.chart) return;
+            if (chartState.chart) {
+                chartState.chart.applyOptions({ localization: chartLocalization() });
+                return;
+            }
             const el = document.getElementById('chart');
             chartState.chart = LightweightCharts.createChart(el, {
                 width: el.clientWidth,
@@ -335,7 +443,8 @@
                 grid: { vertLines: { color: '#243049' }, horzLines: { color: '#243049' } },
                 rightPriceScale: { borderColor: '#243049' },
                 timeScale: { borderColor: '#243049', timeVisible: true, secondsVisible: false },
-                crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                localization: chartLocalization()
             });
             chartState.series = chartState.chart.addCandlestickSeries({
                 upColor: '#22c55e',
@@ -373,15 +482,19 @@
             ensureChart();
             chartState.series.setData(data.candles || []);
             chartState.series.setMarkers(data.markers || []);
-            document.getElementById('chart-title').textContent = 'Velas ' + data.symbol + ' · ' + data.timeframe;
+            const meta = data.meta || {};
+            const tzLabel = meta.chart_time_zone === 'UTC' ? 'UTC' : 'NY';
+            const entryTag = meta.matches_bot_entry_tf ? ' · ENTRADA BOT ★' : '';
+            document.getElementById('chart-title').textContent =
+                'Velas ' + data.symbol + ' · ' + data.timeframe + entryTag + ' · hora ' + tzLabel;
             const buys = (data.markers || []).filter((m) => m.side === 'buy').length;
             const sells = (data.markers || []).filter((m) => m.side === 'sell').length;
-            const meta = data.meta || {};
             const feed = meta.feed ? (' · feed ' + meta.feed) : '';
             const adj = meta.adjustment ? (' · adj ' + meta.adjustment) : '';
-            const botTf = meta.bot_entry_timeframe ? (' · bot entrada ' + meta.bot_entry_timeframe) : '';
-            const lastBar = meta.last_bar_start_utc ? (' · ultima vela ' + meta.last_bar_start_utc) : '';
-            msg.textContent = (data.candles || []).length + ' velas Alpaca' + feed + adj + botTf + lastBar
+            const closed = meta.candles_closed_only ? ' · velas cerradas' : '';
+            const lastBar = meta.last_bar_start_local || meta.last_bar_start_utc || '';
+            const lastTxt = lastBar ? (' · ultima ' + lastBar) : '';
+            msg.textContent = (data.candles || []).length + ' velas Alpaca' + feed + adj + closed + lastTxt
                 + ' · ' + buys + ' compras · ' + sells + ' ventas · refresh 60s';
         }
         function fillSymbols(symbols) {
@@ -404,24 +517,30 @@
                 const row = scheduler.layers[name];
                 const mins = Math.round((row.interval_seconds || 0) / 60);
                 const next = row.next_in_seconds != null ? row.next_in_seconds + 's' : '—';
-                const label = name === '3m' ? 'Rapido' : name === 'entry' ? 'Senales' : name === '1h' ? '1H asim' : 'Macro';
+                let label = 'Macro';
+                if (name === '3m') label = 'Rapido';
+                else if (name === 'entry') label = 'Sync entrada';
+                else if (name === '1h') label = 'Legacy 1H';
                 return '<span class="layer-chip"><strong>' + name + '</strong> ' + label
                     + ' · cada ' + mins + 'm · prox ' + next + '</span>';
             });
             const symBits = Object.keys(scheduler.symbols || {}).map((sym) => {
                 const s = scheduler.symbols[sym];
                 const spike = s.spike ? ' ⚡' + (s.spike_move_pct || 0).toFixed(2) + '%' : '';
-                const trend = s.trend || s.trend_1h || '—';
-                return sym + ': señal=' + (s.signal || 'hold')
-                    + ' | 9m=' + (s.structure || '—')
+                const trend = s.trend || '—';
+                const detail = (s.signal_detail || '').slice(0, 72);
+                const score = s.entry_score != null ? (' score=' + s.entry_score) : '';
+                return sym + ': <strong>' + (s.signal || 'hold') + '</strong>'
+                    + score
                     + ' | trend=' + trend
-                    + ' | macro=' + (s.macro || '—')
+                    + (detail ? ' | ' + detail : '')
                     + spike;
             });
             el.innerHTML = modeLine + '<div class="layer-row">' + layerBits.join('') + '</div>'
                 + '<div class="layer-symbols">' + symBits.join(' · ') + '</div>';
         }
         function renderDashboard(data) {
+            lastDashboardData = data;
             if (data.bot && !BotUI.loading) {
                 BotUI.apply(data.bot, false);
             }
@@ -545,7 +664,13 @@
 
         document.getElementById('toggle-bot').addEventListener('click', () => BotUI.toggle());
         document.getElementById('symbol-select').addEventListener('change', loadChart);
-        document.getElementById('tf-select').addEventListener('change', loadChart);
+        document.getElementById('tf-select').addEventListener('change', () => {
+            chartState.timeframe = document.getElementById('tf-select').value;
+            if (lastDashboardData) {
+                updateChartEntryHint(lastDashboardData);
+            }
+            loadChart();
+        });
 
         BotUI.sync().then(() => fullRefresh());
         DashboardRefresh.timers.push(setInterval(() => BotUI.sync(), DashboardRefresh.BOT_MS));

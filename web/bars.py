@@ -20,6 +20,7 @@ from bot.market.assets import is_crypto_symbol
 from bot.runtime_paths import configure_runtime_paths
 from bot.security.sanitize import sanitize_symbol, sanitize_timeframe
 from bot.storage.journal import TradeJournal
+from bot.strategy.sync_entry import closed_bars_only
 
 _LOOKBACK = {
     "1Min": 240,
@@ -73,10 +74,20 @@ def main() -> int:
     feed = resolve_stock_data_feed(settings.stock_data_feed)
     market = MarketDataService(client, feed=feed)
     lookback = _LOOKBACK.get(timeframe, 180)
-    bars = market.get_bars(symbol, timeframe, lookback, skip_cache=True)
+    bars_raw = market.get_bars(symbol, timeframe, lookback, skip_cache=True)
+    now = datetime.now(timezone.utc)
+    bars = closed_bars_only(bars_raw, timeframe, now)
+    if bars.empty and not bars_raw.empty:
+        bars = bars_raw.copy()
+
+    crypto = is_crypto_symbol(symbol)
+    bot_entry_tf = settings.crypto_bar_timeframe if crypto else settings.stock_entry_timeframe
+    bot_regime_tf = settings.crypto_regime_timeframe if crypto else "9Min"
+    bot_confirm_tf = settings.crypto_regime_timeframe if crypto else settings.confirm_higher_tf
 
     candles: list[dict] = []
     last_bar_utc = ""
+    last_bar_local = ""
     if not bars.empty:
         for ts, row in bars.iterrows():
             candles.append(
@@ -93,6 +104,13 @@ def main() -> int:
         if last_ts.tzinfo is None:
             last_ts = last_ts.tz_localize("UTC")
         last_bar_utc = last_ts.strftime("%Y-%m-%d %H:%M:%S UTC")
+        try:
+            from zoneinfo import ZoneInfo
+
+            display_tz = ZoneInfo("UTC") if crypto else ZoneInfo("America/New_York")
+            last_bar_local = last_ts.astimezone(display_tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+        except Exception:
+            last_bar_local = last_bar_utc
 
     times = [c["time"] for c in candles]
     markers: list[dict] = []
@@ -118,9 +136,6 @@ def main() -> int:
         )
     markers.sort(key=lambda item: item["time"])
 
-    crypto = is_crypto_symbol(symbol)
-    bot_entry_tf = settings.crypto_bar_timeframe if crypto else settings.stock_entry_timeframe
-
     json.dump(
         {
             "symbol": symbol,
@@ -132,10 +147,18 @@ def main() -> int:
                 "adjustment": "none" if crypto else "split",
                 "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
                 "last_bar_start_utc": last_bar_utc,
+                "last_bar_start_local": last_bar_local,
+                "chart_time_zone": "UTC" if crypto else "America/New_York",
+                "bot_profile": settings.bot_profile,
+                "sync_entry_enabled": bool(settings.sync_entry_enabled),
                 "bot_entry_timeframe": bot_entry_tf,
+                "bot_regime_timeframe": bot_regime_tf,
+                "bot_confirm_timeframe": bot_confirm_tf,
+                "candles_closed_only": True,
+                "matches_bot_entry_tf": timeframe == bot_entry_tf,
                 "compare_hint": (
-                    "Usa el mismo intervalo en Alpaca. Acciones: feed IEX vs SIP de la app "
-                    "puede cambiar OHLC; ALPACA_STOCK_DATA_FEED=sip si tu plan lo permite."
+                    "Velas cerradas = misma base que sync_entry. Acciones en hora NY. "
+                    "Feed IEX vs SIP puede cambiar OHLC vs la app Alpaca."
                 ),
             },
         },
