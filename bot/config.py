@@ -66,6 +66,7 @@ class Settings:
     crypto_sma_fast: int
     crypto_sma_slow: int
     bar_timeframe: str
+    stock_data_feed: str
     crypto_bar_timeframe: str
     crypto_regime_timeframe: str
     lookback_bars: int
@@ -440,6 +441,9 @@ def load_settings(env_path: Path | None = None) -> Settings:
             os.getenv("CRYPTO_SMA_SLOW"), 21, min_value=3, max_value=400, name="CRYPTO_SMA_SLOW"
         ),
         bar_timeframe=sanitize_timeframe(os.getenv("BAR_TIMEFRAME"), "1Day"),
+        stock_data_feed=(
+            os.getenv("ALPACA_STOCK_DATA_FEED", "iex").strip().lower() or "iex"
+        ),
         crypto_bar_timeframe=sanitize_timeframe(
             os.getenv("CRYPTO_BAR_TIMEFRAME"), "15Min"
         ),

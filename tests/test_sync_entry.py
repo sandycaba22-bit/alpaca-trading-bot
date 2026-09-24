@@ -37,6 +37,7 @@ def _settings(**overrides) -> Settings:
         "crypto_sma_fast": 9,
         "crypto_sma_slow": 21,
         "bar_timeframe": "1Day",
+        "stock_data_feed": "iex",
         "crypto_bar_timeframe": "15Min",
         "crypto_regime_timeframe": "30Min",
         "lookback_bars": 120,

@@ -82,6 +82,18 @@ def parse_timeframe(value: str) -> TimeFrame:
         raise ValidationError("BAR_TIMEFRAME no permitido") from exc
 
 
+def resolve_stock_data_feed(label: str | None) -> DataFeed:
+    """Feed de barras US (IEX gratis en paper; SIP = consolidado, suele coincidir con la app Alpaca)."""
+    key = str(label or "iex").strip().lower()
+    if key == "sip":
+        return DataFeed.SIP
+    if key == "iex":
+        return DataFeed.IEX
+    if key in ("otc",):
+        return DataFeed.OTC
+    return DataFeed.IEX
+
+
 class MarketDataService:
     def __init__(self, client: AlpacaClient, feed: DataFeed = DataFeed.IEX) -> None:
         self.client = client
@@ -93,15 +105,18 @@ class MarketDataService:
         symbol: str,
         timeframe: str,
         lookback_bars: int,
+        *,
+        skip_cache: bool = False,
     ) -> pd.DataFrame:
         symbol = sanitize_symbol(symbol)
         cache_key = (symbol, timeframe, int(lookback_bars))
         ttl = _BAR_CACHE_TTL_SECONDS.get(timeframe, 60.0)
-        cached = self._bars_cache.get(cache_key)
-        if cached is not None:
-            cached_at, frame = cached
-            if (time.monotonic() - cached_at) < ttl and not frame.empty:
-                return frame.copy()
+        if not skip_cache:
+            cached = self._bars_cache.get(cache_key)
+            if cached is not None:
+                cached_at, frame = cached
+                if (time.monotonic() - cached_at) < ttl and not frame.empty:
+                    return frame.copy()
 
         tf = parse_timeframe(timeframe)
         start = self._start_for_lookback(tf, lookback_bars, crypto=is_crypto_symbol(symbol))

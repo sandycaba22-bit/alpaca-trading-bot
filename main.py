@@ -11,7 +11,7 @@ import sys
 
 from bot.alpaca.client import AlpacaClient
 from bot.alpaca.execution import OrderExecutor
-from bot.alpaca.market_data import MarketDataService
+from bot.alpaca.market_data import MarketDataService, resolve_stock_data_feed
 from bot.alpaca.reconcile import adopt_open_orders, assert_positions_match
 from bot.backtest.compare_mtf import format_mtf_report, run_mtf_compare
 from bot.backtest.compare_regimes import format_reports, run_compare
@@ -339,7 +339,9 @@ def main(argv: list[str] | None = None) -> int:
     engine = TradingEngine(
         settings=settings,
         client=client,
-        market_data=MarketDataService(client),
+        market_data=MarketDataService(
+            client, feed=resolve_stock_data_feed(settings.stock_data_feed)
+        ),
         executor=executor,
         strategy=strategy,
         risk=RiskManager(settings, overrides=stored_params),

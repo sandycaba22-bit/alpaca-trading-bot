@@ -46,7 +46,8 @@
                 <select id="tf-select">
                     <option value="5Min">5 min (entrada acciones)</option>
                     <option value="9Min">9 min (macro acciones)</option>
-                    <option value="15Min" selected>15 min</option>
+                    <option value="15Min">15 min (entrada cripto)</option>
+                    <option value="30Min">30 min (macro cripto)</option>
                     <option value="1Hour">1 hora</option>
                     <option value="1Day">1 dia</option>
                 </select>
@@ -101,6 +102,7 @@
 
         const DashboardRefresh = {
             FULL_MS: 15 * 60 * 1000,
+            CHART_MS: 60 * 1000,
             MODE_MS: 60 * 1000,
             BOT_MS: 5000,
             nextFullAt: Date.now() + 15 * 60 * 1000,
@@ -374,8 +376,13 @@
             document.getElementById('chart-title').textContent = 'Velas ' + data.symbol + ' · ' + data.timeframe;
             const buys = (data.markers || []).filter((m) => m.side === 'buy').length;
             const sells = (data.markers || []).filter((m) => m.side === 'sell').length;
-            msg.textContent = (data.candles || []).length + ' velas Alpaca · '
-                + buys + ' compras (verde) · ' + sells + ' ventas (rojo)';
+            const meta = data.meta || {};
+            const feed = meta.feed ? (' · feed ' + meta.feed) : '';
+            const adj = meta.adjustment ? (' · adj ' + meta.adjustment) : '';
+            const botTf = meta.bot_entry_timeframe ? (' · bot entrada ' + meta.bot_entry_timeframe) : '';
+            const lastBar = meta.last_bar_start_utc ? (' · ultima vela ' + meta.last_bar_start_utc) : '';
+            msg.textContent = (data.candles || []).length + ' velas Alpaca' + feed + adj + botTf + lastBar
+                + ' · ' + buys + ' compras · ' + sells + ' ventas · refresh 60s';
         }
         function fillSymbols(symbols) {
             /* sustituido por syncSymbolSelect en renderDashboard */
@@ -544,6 +551,7 @@
         DashboardRefresh.timers.push(setInterval(() => BotUI.sync(), DashboardRefresh.BOT_MS));
         DashboardRefresh.timers.push(setInterval(() => loadStatus(), DashboardRefresh.MODE_MS));
         DashboardRefresh.timers.push(setInterval(() => fullRefresh(), DashboardRefresh.FULL_MS));
+        DashboardRefresh.timers.push(setInterval(() => loadChart(), DashboardRefresh.CHART_MS));
         DashboardRefresh.timers.push(setInterval(updateRefreshMessage, 1000));
         updateRefreshMessage();
     </script>

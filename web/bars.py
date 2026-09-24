@@ -14,15 +14,21 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from bot.alpaca.client import AlpacaClient
-from bot.alpaca.market_data import MarketDataService
+from bot.alpaca.market_data import MarketDataService, resolve_stock_data_feed
 from bot.config import load_settings
+from bot.market.assets import is_crypto_symbol
+from bot.runtime_paths import configure_runtime_paths
 from bot.security.sanitize import sanitize_symbol, sanitize_timeframe
 from bot.storage.journal import TradeJournal
 
 _LOOKBACK = {
     "1Min": 240,
+    "3Min": 200,
     "5Min": 200,
+    "6Min": 200,
+    "9Min": 200,
     "15Min": 180,
+    "30Min": 180,
     "1Hour": 200,
     "1Day": 180,
 }
@@ -62,11 +68,15 @@ def main() -> int:
     symbol = sanitize_symbol(args.symbol)
     timeframe = sanitize_timeframe(args.timeframe, "15Min")
     settings = load_settings()
+    configure_runtime_paths(settings)
     client = AlpacaClient(settings)
-    market = MarketDataService(client)
-    bars = market.get_bars(symbol, timeframe, _LOOKBACK.get(timeframe, 180))
+    feed = resolve_stock_data_feed(settings.stock_data_feed)
+    market = MarketDataService(client, feed=feed)
+    lookback = _LOOKBACK.get(timeframe, 180)
+    bars = market.get_bars(symbol, timeframe, lookback, skip_cache=True)
 
     candles: list[dict] = []
+    last_bar_utc = ""
     if not bars.empty:
         for ts, row in bars.iterrows():
             candles.append(
@@ -79,6 +89,10 @@ def main() -> int:
                 }
             )
         candles.sort(key=lambda item: item["time"])
+        last_ts = pd.Timestamp(bars.index[-1])
+        if last_ts.tzinfo is None:
+            last_ts = last_ts.tz_localize("UTC")
+        last_bar_utc = last_ts.strftime("%Y-%m-%d %H:%M:%S UTC")
 
     times = [c["time"] for c in candles]
     markers: list[dict] = []
@@ -104,12 +118,26 @@ def main() -> int:
         )
     markers.sort(key=lambda item: item["time"])
 
+    crypto = is_crypto_symbol(symbol)
+    bot_entry_tf = settings.crypto_bar_timeframe if crypto else settings.stock_entry_timeframe
+
     json.dump(
         {
             "symbol": symbol,
             "timeframe": timeframe,
             "candles": candles,
             "markers": markers,
+            "meta": {
+                "feed": getattr(feed, "value", str(feed)),
+                "adjustment": "none" if crypto else "split",
+                "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "last_bar_start_utc": last_bar_utc,
+                "bot_entry_timeframe": bot_entry_tf,
+                "compare_hint": (
+                    "Usa el mismo intervalo en Alpaca. Acciones: feed IEX vs SIP de la app "
+                    "puede cambiar OHLC; ALPACA_STOCK_DATA_FEED=sip si tu plan lo permite."
+                ),
+            },
         },
         sys.stdout,
         ensure_ascii=True,
