@@ -15,6 +15,8 @@ _PULLBACK_FLOW = frozenset(
         StrategyId.TREND_PULLBACK.value,
     }
 )
+# sync_entry ya valida impulso en velas cerradas; no repetir "ruptura ágil" en tape.
+_SYNC_ENTRY_FLOW = frozenset({"sync_entry"})
 
 
 class PriceFlowFilter:
@@ -109,6 +111,10 @@ class PriceFlowFilter:
         key = str(ctx.entry_strategy or "").strip().lower()
         return key in _PULLBACK_FLOW
 
+    def _is_sync_entry(self, ctx: StrategyContext) -> bool:
+        key = str(ctx.entry_strategy or "").strip().lower()
+        return key in _SYNC_ENTRY_FLOW
+
     def confirm(self, signal: Signal, ctx: StrategyContext) -> tuple[bool, str]:
         if signal is Signal.HOLD:
             return False, "hold"
@@ -120,8 +126,10 @@ class PriceFlowFilter:
         vs_close = (ctx.last_price - last_close) / last_close if last_close else 0.0
         zone_pct = self._zone_buffer_pct(ctx)
         pullback_entry = self._is_pullback_entry(ctx)
+        sync_entry = self._is_sync_entry(ctx)
+        tape_relaxed = pullback_entry or sync_entry
         trigger_ready, trigger_reason = self._trigger_ready(signal, ctx, zone_pct)
-        spread_limit = self.max_spread_pct * (2.0 if trigger_ready or pullback_entry else 1.0)
+        spread_limit = self.max_spread_pct * (2.0 if trigger_ready or tape_relaxed else 1.0)
 
         if ctx.spread_pct is not None and ctx.spread_pct > spread_limit:
             return False, (
@@ -129,27 +137,42 @@ class PriceFlowFilter:
             )
 
         if signal is Signal.BUY:
-            if pullback_entry:
+            if tape_relaxed:
                 if vs_close <= -(self.max_adverse_vs_close_pct + zone_pct):
+                    adverse_msg = (
+                        "sync_entry no compra contra el tape"
+                        if sync_entry
+                        else "pullback no compra contra el tape"
+                    )
                     return False, (
-                        f"flujo bajista vs cierre ({vs_close:.2%}); "
-                        "pullback no compra contra el tape"
+                        f"flujo bajista vs cierre ({vs_close:.2%}); {adverse_msg}"
                     )
                 if (
                     ctx.momentum_pct is not None
                     and ctx.momentum_pct <= -(self.adverse_momentum_pct + zone_pct)
                 ):
                     return False, f"momentum corto plazo {ctx.momentum_pct:.2%} adverso"
+                flow_label = (
+                    "sync_entry sin exigir ruptura en tape"
+                    if sync_entry
+                    else "pullback sin exigir ruptura"
+                )
                 logger.info(
-                    "%s | flujo OK | motivo=pullback sin exigir ruptura | last=%.4f close=%.4f "
+                    "%s | flujo OK | motivo=%s | last=%.4f close=%.4f "
                     "vs_close=%+.2f%% spread=%s",
                     ctx.symbol,
+                    flow_label,
                     ctx.last_price,
                     last_close,
                     vs_close * 100,
                     f"{ctx.spread_pct:.4%}" if ctx.spread_pct is not None else "n/a",
                 )
-                return True, "pullback — flujo sin exigir ruptura"
+                ok_reason = (
+                    "sync_entry — flujo sin exigir ruptura en tape"
+                    if sync_entry
+                    else "pullback — flujo sin exigir ruptura"
+                )
+                return True, ok_reason
             if not trigger_ready:
                 return False, trigger_reason
             if vs_close <= -(self.max_adverse_vs_close_pct + zone_pct):
