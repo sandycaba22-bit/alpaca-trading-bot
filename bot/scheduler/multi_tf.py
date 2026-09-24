@@ -30,6 +30,7 @@ from bot.strategy.crypto_asymmetric import (
     params_from_settings,
     resample_4h_from_1h,
 )
+from bot.strategy.sync_entry import STRATEGY_TAG, evaluate_sync_entry
 from bot.strategy.multi_tf_analysis import (
     MacroSnapshot,
     SpikeSnapshot,
@@ -125,6 +126,7 @@ class SymbolEntryScan:
     has_long: bool
     last_sl_mult: float | None = None
     entry_strategy: str | None = None
+    sync_skip_confirm: bool = False
 
 
 class SchedulerStateStore:
@@ -215,7 +217,7 @@ class MultiTimeframeEngine:
         self._last_dormant_log_at: float = 0.0
         self._crypto_trades_day: str = ""
         self._crypto_trades_count: int = 0
-        if profile == "crypto":
+        if profile == "crypto" and not engine.settings.sync_entry_enabled:
             tick_1h = int(engine.settings.crypto_asymmetric_tick_seconds)
             self.scheduler.intervals = {"1h": tick_1h}
 
@@ -264,7 +266,7 @@ class MultiTimeframeEngine:
             self._persist()
             return
 
-        if self._crypto_runtime():
+        if self._crypto_runtime() and not engine.settings.sync_entry_enabled:
             engine._mark_all_positions()
             now_mono = time.monotonic()
             settings = engine.settings
@@ -493,8 +495,83 @@ class MultiTimeframeEngine:
             return True
         return False
 
+    def _scan_sync_entry_symbol(self, symbol: str, positions: dict) -> SymbolEntryScan | None:
+        engine = self.engine
+        settings = engine.settings
+        cache = self.cache[symbol]
+        crypto = is_crypto_symbol(symbol)
+        entry_tf = self._signal_timeframe(symbol)
+        regime_tf = self._regime_timeframe(symbol)
+        confirm_tf = self._higher_confirmation_timeframe(symbol)
+        lookback = max(int(settings.lookback_bars), 80)
+
+        entry_bars = engine.market_data.get_bars(symbol, entry_tf, lookback)
+        regime_bars = engine.market_data.get_bars(symbol, regime_tf, lookback)
+        confirm_bars = engine.market_data.get_bars(symbol, confirm_tf, lookback)
+        if entry_bars.empty:
+            return None
+
+        position = positions.get(normalize_symbol(symbol)) or positions.get(symbol)
+        has_long = position is not None and float(position.qty) > 0
+
+        decision = evaluate_sync_entry(
+            entry_bars=entry_bars,
+            regime_bars=regime_bars,
+            confirm_bars=confirm_bars,
+            entry_tf=entry_tf,
+            regime_tf=regime_tf,
+            confirm_tf=confirm_tf,
+            has_long=has_long,
+            is_crypto=crypto,
+            settings=settings,
+        )
+
+        cache.trend = decision.htf_trend if decision.htf_trend != "n/a" else cache.trend
+        cache.entry_score = float(decision.confidence)
+        cache.entry_score_detail = decision.reason if decision.allowed else decision.reason
+
+        if decision.allowed:
+            cache.signal = Signal.BUY
+            cache.signal_detail = decision.reason
+            signal = Signal.BUY
+            detail = decision.reason
+        else:
+            cache.signal = Signal.HOLD
+            cache.signal_detail = decision.reason
+            signal = Signal.HOLD
+            detail = decision.reason
+
+        tape = engine.live_tape(symbol, fallback_price=float(entry_bars["close"].iloc[-1]))
+        last_price = tape.last_price if tape else float(entry_bars["close"].iloc[-1])
+        last_price = engine.latest_price(symbol, last_price)
+
+        score_log = f" | conf={decision.confidence:.0f}" if decision.confidence else ""
+        logger.info(
+            "%s | eval sync entrada | tf=%s | señal=%s | %s | precio=%.4f%s",
+            symbol,
+            entry_tf,
+            signal.value,
+            detail,
+            last_price,
+            score_log,
+        )
+
+        return SymbolEntryScan(
+            bars=entry_bars,
+            tape=tape,
+            last_price=last_price,
+            position=position,
+            has_long=has_long,
+            last_sl_mult=decision.sl_atr_mult if decision.allowed else None,
+            entry_strategy=STRATEGY_TAG if decision.allowed else None,
+            sync_skip_confirm=decision.allowed,
+        )
+
     def _scan_entry_symbol(self, symbol: str, positions: dict) -> SymbolEntryScan | None:
         engine = self.engine
+        if engine.settings.sync_entry_enabled:
+            return self._scan_sync_entry_symbol(symbol, positions)
+
         cache = self.cache[symbol]
         signal_tf = self._signal_timeframe(symbol)
         bars = engine.market_data.get_bars(symbol, signal_tf, engine.settings.lookback_bars)
@@ -614,7 +691,10 @@ class MultiTimeframeEngine:
             logger.info("%s | HOLD entrada | %s", symbol, detail)
             return
 
-        score_min = entry_score_min_for(settings, symbol)
+        if settings.sync_entry_enabled:
+            score_min = float(settings.sync_entry_score_min)
+        else:
+            score_min = entry_score_min_for(settings, symbol)
         if signal is Signal.BUY and settings.entry_score_enabled:
             gate_detail = cache.entry_score_detail or f"score={cache.entry_score:.0f}"
             if float(cache.entry_score) < float(score_min):
@@ -628,7 +708,7 @@ class MultiTimeframeEngine:
         # SMA y ADX de ruptura ya se aplican en el orquestador / selector de régimen.
         # No se re-filtran aquí para no duplicar el mismo veto.
 
-        if signal is Signal.BUY:
+        if signal is Signal.BUY and not settings.sync_entry_enabled:
             cool = filters.check_cooldown(symbol, bars)
             if not cool.allowed:
                 logger.info("%s | %s", symbol, cool.reason)
@@ -641,6 +721,7 @@ class MultiTimeframeEngine:
         if (
             signal is Signal.BUY
             and settings.entry_confirmation_enabled
+            and not scan.sync_skip_confirm
             and not htf_relaxed
         ):
             higher_tf = None
@@ -689,6 +770,12 @@ class MultiTimeframeEngine:
     def run_all_layers_once(self) -> None:
         clock = self.engine.client.get_market_clock()
         self._apply_trading_mode(clock)
+        settings = self.engine.settings
+        if self._crypto_runtime() and not settings.sync_entry_enabled:
+            if settings.crypto_asymmetric_live_enabled:
+                self._layer_crypto_asymmetric()
+            self._persist()
+            return
         self._layer_9m()
         self._layer_3m()
         self._layer_entry_execute()
@@ -850,7 +937,10 @@ class MultiTimeframeEngine:
 
     def _sync_intervals_for_mode(self, *, reset: bool = False) -> None:
         settings = self.engine.settings
-        entry_secs = _timeframe_seconds(settings.stock_entry_timeframe)
+        if self._crypto_runtime():
+            entry_secs = _timeframe_seconds(settings.crypto_bar_timeframe)
+        else:
+            entry_secs = _timeframe_seconds(settings.stock_entry_timeframe)
         intervals = {
             "3m": settings.tf_3m_seconds,
             "entry": max(settings.tf_entry_seconds, entry_secs),

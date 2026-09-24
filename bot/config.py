@@ -197,6 +197,15 @@ class Settings:
     strategy_collision_mode: str = "score"
     entry_score_enabled: bool = True
     entry_score_min: float = 50.0
+    # Entrada unificada sync_entry (sustituye orquestador + cripto asimétrico en live)
+    sync_entry_enabled: bool = True
+    sync_entry_score_min: float = 65.0
+    sync_entry_pivot_bars: int = 12
+    sync_entry_body_min_frac: float = 0.55
+    sync_entry_rsi_min: float = 52.0
+    sync_entry_rsi_max: float = 72.0
+    sync_entry_volume_mult_stock: float = 1.35
+    sync_entry_volume_mult_crypto: float = 1.25
     entry_score_macro_penalty: float = 40.0
     entry_score_spike_adverse_penalty: float = 35.0
     entry_score_spike_favor_bonus: float = 20.0
@@ -1066,6 +1075,44 @@ def load_settings(env_path: Path | None = None) -> Settings:
             min_value=5.0,
             max_value=50.0,
             name="ENTRY_SCORE_SPIKE_FAVOR_BONUS",
+        ),
+        sync_entry_enabled=_as_bool(os.getenv("SYNC_ENTRY_ENABLED"), default=True),
+        sync_entry_score_min=bounded_float(
+            os.getenv("SYNC_ENTRY_SCORE_MIN"),
+            65.0,
+            min_value=40.0,
+            max_value=100.0,
+            name="SYNC_ENTRY_SCORE_MIN",
+        ),
+        sync_entry_pivot_bars=bounded_int(
+            os.getenv("SYNC_ENTRY_PIVOT_BARS"), 12, min_value=5, max_value=40, name="SYNC_ENTRY_PIVOT_BARS"
+        ),
+        sync_entry_body_min_frac=bounded_float(
+            os.getenv("SYNC_ENTRY_BODY_MIN_FRAC"),
+            0.55,
+            min_value=0.35,
+            max_value=0.85,
+            name="SYNC_ENTRY_BODY_MIN_FRAC",
+        ),
+        sync_entry_rsi_min=bounded_float(
+            os.getenv("SYNC_ENTRY_RSI_MIN"), 52.0, min_value=40.0, max_value=65.0, name="SYNC_ENTRY_RSI_MIN"
+        ),
+        sync_entry_rsi_max=bounded_float(
+            os.getenv("SYNC_ENTRY_RSI_MAX"), 72.0, min_value=60.0, max_value=85.0, name="SYNC_ENTRY_RSI_MAX"
+        ),
+        sync_entry_volume_mult_stock=bounded_float(
+            os.getenv("SYNC_ENTRY_VOLUME_MULT_STOCK"),
+            1.35,
+            min_value=1.0,
+            max_value=3.0,
+            name="SYNC_ENTRY_VOLUME_MULT_STOCK",
+        ),
+        sync_entry_volume_mult_crypto=bounded_float(
+            os.getenv("SYNC_ENTRY_VOLUME_MULT_CRYPTO"),
+            1.25,
+            min_value=1.0,
+            max_value=3.0,
+            name="SYNC_ENTRY_VOLUME_MULT_CRYPTO",
         ),
         risk_percent_per_trade=bounded_float(
             os.getenv("RISK_PERCENT_PER_TRADE"),

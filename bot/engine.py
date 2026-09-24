@@ -265,6 +265,14 @@ class TradingEngine:
         clock = self.client.get_market_clock()
         mode, active = resolve_trading_mode(clock, self.settings)
         open_n = len(self.executor.list_positions())
+        if self.settings.sync_entry_enabled:
+            logger.info(
+                "Entrada sync_entry activa | min_conf=%.0f | pivot=%s velas | acciones tf=%s | cripto tf=%s",
+                self.settings.sync_entry_score_min,
+                self.settings.sync_entry_pivot_bars,
+                self.settings.stock_entry_timeframe,
+                self.settings.crypto_bar_timeframe,
+            )
         logger.info(
             "Motor Tesla 3-6-9 | %s | activos=%s | acciones=%s | cripto=%s | tick=%ss | "
             "capas 3m=%ss entry=%ss 9m=%ss | dry_run=%s | SL=%.2f%% TP=%.2f%% | posiciones=%s",
