@@ -1168,6 +1168,7 @@ class OrderExecutor:
                     stop_pct=float(stop_pct or 0.01),
                     take_profit_pct=float(take_profit_pct or 0.015),
                     dry_run=dry_run,
+                    entry_strategy=str(reason or ""),
                 )
             else:
                 self.position_book.add_fill(symbol, qty, fill_price)

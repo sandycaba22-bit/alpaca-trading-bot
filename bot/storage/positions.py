@@ -37,6 +37,7 @@ class TrackedPosition:
     breakeven_notified: bool = False
     opened_qty: float = 0.0
     peak_price: float = 0.0
+    entry_strategy: str = ""
 
     @property
     def side(self) -> str:
@@ -85,6 +86,7 @@ class OpenPositionBook:
                     breakeven_notified=bool(data.get("breakeven_notified", False)),
                     opened_qty=float(data.get("opened_qty", data.get("qty", 0.0)) or 0.0),
                     peak_price=float(data.get("peak_price", 0.0) or 0.0),
+                    entry_strategy=str(data.get("entry_strategy", "") or ""),
                 )
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             logger.warning("No se pudo cargar libro de posiciones: %s", type(exc).__name__)
@@ -116,6 +118,7 @@ class OpenPositionBook:
         stop_pct: float,
         take_profit_pct: float,
         dry_run: bool,
+        entry_strategy: str = "",
     ) -> TrackedPosition:
         key = _book_key(symbol)
         pos = TrackedPosition(
@@ -132,11 +135,13 @@ class OpenPositionBook:
             current_price=float(entry_price),
             opened_qty=float(qty),
             peak_price=float(entry_price),
+            entry_strategy=str(entry_strategy or ""),
         )
         self._positions[key] = pos
         self.save()
+        tag = f" estrategia={entry_strategy}" if entry_strategy else ""
         logger.info(
-            "Posicion abierta | %s qty=%s entry=%.4f SL=%.4f (%.2f%%) TP=%.4f (%.2f%%)",
+            "Posicion abierta | %s qty=%s entry=%.4f SL=%.4f (%.2f%%) TP=%.4f (%.2f%%)%s",
             key,
             qty,
             entry_price,
@@ -144,6 +149,7 @@ class OpenPositionBook:
             stop_pct * 100,
             take_profit_price,
             take_profit_pct * 100,
+            tag,
         )
         return pos
 

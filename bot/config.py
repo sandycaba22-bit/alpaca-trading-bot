@@ -149,6 +149,9 @@ class Settings:
     crypto_asymmetric_trail_activate_atr_mult: float = 1.25
     crypto_asymmetric_double_breakout: bool = False
     crypto_asymmetric_tick_seconds: int = 3600
+    # Paper: entrada régimen HTF+ATR en símbolos listados (p. ej. ETH/USD), en paralelo a sync_entry en el resto
+    crypto_regime_entry_enabled: bool = False
+    crypto_regime_entry_symbols: tuple[str, ...] = ()
     # Salidas asimétricas acciones (SL ATR ceñido, trailing ancho, sin TP fijo %) — live tras backtest
     stock_asymmetric_exits_enabled: bool = False
     stock_asymmetric_sl_atr_mult: float = 1.2
@@ -261,6 +264,23 @@ class Settings:
             raise ValidationError(
                 "BOT_PROFILE=crypto exige cuenta paper (APCA_API_BASE_URL paper)"
             )
+        if self.crypto_regime_entry_enabled:
+            if not self.paper:
+                raise ValidationError(
+                    "CRYPTO_REGIME_ENTRY_ENABLED requiere cuenta paper (APCA_API_BASE_URL paper)"
+                )
+            if not self.crypto_regime_entry_symbols:
+                raise ValidationError(
+                    "CRYPTO_REGIME_ENTRY_ENABLED requiere CRYPTO_REGIME_ENTRY_SYMBOLS (ej. ETH/USD)"
+                )
+            from bot.market.assets import normalize_symbol
+
+            allowed = {normalize_symbol(s) for s in self.crypto_symbols}
+            for sym in self.crypto_regime_entry_symbols:
+                if normalize_symbol(sym) not in allowed:
+                    raise ValidationError(
+                        f"CRYPTO_REGIME_ENTRY_SYMBOLS incluye {sym!r} fuera de CRYPTO_SYMBOLS"
+                    )
 
 
 def _parse_bot_profile(raw: str | None) -> str:
@@ -848,6 +868,12 @@ def load_settings(env_path: Path | None = None) -> Settings:
             min_value=300,
             max_value=86400,
             name="CRYPTO_ASYMMETRIC_TICK_SECONDS",
+        ),
+        crypto_regime_entry_enabled=_as_bool(
+            os.getenv("CRYPTO_REGIME_ENTRY_ENABLED"), default=False
+        ),
+        crypto_regime_entry_symbols=tuple(
+            sanitize_crypto_symbols(os.getenv("CRYPTO_REGIME_ENTRY_SYMBOLS"), allow_empty=True)
         ),
         stock_asymmetric_exits_enabled=_as_bool(
             os.getenv("STOCK_ASYMMETRIC_EXITS_ENABLED"), default=False

@@ -232,8 +232,9 @@ class TradingEngine:
         )
 
     def _crypto_asymmetric_exits(self, symbol: str) -> bool:
-        s = self.settings
-        return is_crypto_symbol(symbol) and s.crypto_asymmetric_live_enabled
+        from bot.market.crypto_runtime import crypto_uses_asymmetric_exits
+
+        return crypto_uses_asymmetric_exits(self.settings, symbol)
 
     def _stock_asymmetric_exits(self, symbol: str) -> bool:
         return (
@@ -346,6 +347,18 @@ class TradingEngine:
             self.settings.crypto_trend_pullback_rsi_max,
         )
         if self.settings.bot_profile == "crypto":
+            if self.settings.crypto_regime_entry_enabled:
+                syms = ",".join(self.settings.crypto_regime_entry_symbols)
+                logger.info(
+                    "Cripto régimen paper | entrada %s | símbolos=%s | SL=%.2fx ATR | trail=%.2fx ATR "
+                    "| activar trail=%.2fx ATR | SIN TP fijo %% | resto sync_entry=%s",
+                    "trend_4h_sma50_atr_exp_1.2",
+                    syms,
+                    self.settings.crypto_asymmetric_sl_atr_mult,
+                    self.settings.crypto_asymmetric_trail_atr_mult,
+                    self.settings.crypto_asymmetric_trail_activate_atr_mult,
+                    self.settings.sync_entry_enabled,
+                )
             if self.settings.crypto_asymmetric_live_enabled:
                 logger.info(
                     "Cripto asimétrico 1H/4H | LIVE ON | SL=%.2fx ATR | trail=%.2fx ATR "
@@ -354,7 +367,7 @@ class TradingEngine:
                     self.settings.crypto_asymmetric_trail_atr_mult,
                     self.settings.crypto_asymmetric_trail_activate_atr_mult,
                 )
-            else:
+            elif not self.settings.crypto_regime_entry_enabled:
                 logger.warning(
                     "Cripto entradas OFF — asimétrico 1H/4H apagado (CRYPTO_ASYMMETRIC_LIVE_ENABLED=false)"
                 )
@@ -2038,6 +2051,9 @@ class TradingEngine:
             )
             return False
         tracked = self.executor.position_book.get(symbol)
+        entry_tag = str(getattr(tracked, "entry_strategy", "") or "") if tracked is not None else ""
+        if entry_tag and "|" not in reason:
+            reason = f"{entry_tag}|{reason}"
         signal_ts = str(getattr(tracked, "opened_at", "") or "") if tracked is not None else ""
         if not signal_ts:
             signal_ts = f"{float(entry_price):.4f}"

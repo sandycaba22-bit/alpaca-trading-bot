@@ -19,6 +19,7 @@ from bot.market.assets import (
     normalize_symbol,
     positions_by_symbol,
 )
+from bot.market.crypto_runtime import symbol_uses_crypto_regime_entry
 from bot.runtime_paths import data_file
 from bot.market.mode import TradingMode, is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.security.exceptions import RateLimitError
@@ -29,6 +30,11 @@ from bot.strategy.crypto_asymmetric import (
     evaluate_entry_live,
     params_from_settings,
     resample_4h_from_1h,
+)
+from bot.strategy.crypto_regime_entry import (
+    GATE_ETH_SMA50_ATR12,
+    REGIME_STRATEGY_TAG,
+    evaluate_regime_entry_live,
 )
 from bot.strategy.stock_entry_volume import check_stock_entry_signal_volume
 from bot.strategy.sync_entry import STRATEGY_TAG, evaluate_sync_entry
@@ -218,7 +224,9 @@ class MultiTimeframeEngine:
         self._last_dormant_log_at: float = 0.0
         self._crypto_trades_day: str = ""
         self._crypto_trades_count: int = 0
-        if profile == "crypto" and not engine.settings.sync_entry_enabled:
+        if profile == "crypto" and (
+            not engine.settings.sync_entry_enabled or engine.settings.crypto_regime_entry_enabled
+        ):
             tick_1h = int(engine.settings.crypto_asymmetric_tick_seconds)
             self.scheduler.intervals = {"1h": tick_1h}
 
@@ -271,7 +279,7 @@ class MultiTimeframeEngine:
             engine._mark_all_positions()
             now_mono = time.monotonic()
             settings = engine.settings
-            if not settings.crypto_asymmetric_live_enabled:
+            if not settings.crypto_asymmetric_live_enabled and not settings.crypto_regime_entry_enabled:
                 if now_mono - self._last_dormant_log_at >= 3600.0:
                     logger.warning(
                         "Cripto sin entradas — asimétrico 1H/4H apagado "
@@ -279,7 +287,10 @@ class MultiTimeframeEngine:
                     )
                     self._last_dormant_log_at = now_mono
             elif self.scheduler.due("1h", now_mono):
-                self._layer_crypto_asymmetric()
+                if settings.crypto_asymmetric_live_enabled:
+                    self._layer_crypto_asymmetric()
+                if settings.crypto_regime_entry_enabled:
+                    self._layer_crypto_regime_entry()
             self._persist()
             return
 
@@ -298,6 +309,13 @@ class MultiTimeframeEngine:
             stream = engine._stream
             if stream is None or stream.health.in_fallback():
                 engine._mark_all_positions()
+
+        if (
+            self._crypto_runtime()
+            and engine.settings.crypto_regime_entry_enabled
+            and self.scheduler.due("1h", now)
+        ):
+            self._layer_crypto_regime_entry()
 
         self._persist()
 
@@ -571,6 +589,8 @@ class MultiTimeframeEngine:
     def _scan_entry_symbol(self, symbol: str, positions: dict) -> SymbolEntryScan | None:
         engine = self.engine
         if engine.settings.sync_entry_enabled:
+            if symbol_uses_crypto_regime_entry(engine.settings, symbol):
+                return None
             return self._scan_sync_entry_symbol(symbol, positions)
 
         cache = self.cache[symbol]
@@ -795,11 +815,15 @@ class MultiTimeframeEngine:
         if self._crypto_runtime() and not settings.sync_entry_enabled:
             if settings.crypto_asymmetric_live_enabled:
                 self._layer_crypto_asymmetric()
+            if settings.crypto_regime_entry_enabled:
+                self._layer_crypto_regime_entry()
             self._persist()
             return
         self._layer_9m()
         self._layer_3m()
         self._layer_entry_execute()
+        if self._crypto_runtime() and settings.crypto_regime_entry_enabled:
+            self._layer_crypto_regime_entry()
         self._persist()
 
     def _apply_trading_mode(self, clock) -> None:
@@ -850,6 +874,80 @@ class MultiTimeframeEngine:
             self._crypto_trades_day = today
             self._crypto_trades_count = 0
         self._crypto_trades_count += 1
+
+    def _layer_crypto_regime_entry(self) -> None:
+        """Paper: entrada régimen (SMA50 4H + ATR exp) solo en símbolos configurados (p. ej. ETH/USD)."""
+        engine = self.engine
+        settings = engine.settings
+        if not settings.crypto_regime_entry_enabled:
+            return
+        params = params_from_settings(settings)
+        gate = GATE_ETH_SMA50_ATR12
+        account = engine.client.snapshot_account_optional()
+        positions = positions_by_symbol(engine.executor.list_positions())
+        profile_positions = filter_positions_for_profile(positions, settings.bot_profile)
+        lookback = max(int(settings.lookback_bars), 120)
+
+        for index, symbol in enumerate(self.active_symbols):
+            if not symbol_uses_crypto_regime_entry(settings, symbol):
+                continue
+            try:
+                bars_1h = engine.market_data.get_bars(symbol, "1Hour", lookback)
+                if bars_1h.empty:
+                    continue
+                bars_4h = resample_4h_from_1h(bars_1h)
+                position = profile_positions.get(normalize_symbol(symbol))
+                has_long = position is not None and float(position.qty) > 0
+                trades_today = self._crypto_trades_today_count()
+                sig = evaluate_regime_entry_live(
+                    bars_1h,
+                    bars_4h,
+                    params,
+                    gate,
+                    has_long=has_long,
+                    trades_today=trades_today,
+                )
+                last_price = float(bars_1h["close"].iloc[-1])
+                logger.info(
+                    "%s | eval régimen 1H | tag=%s | señal=%s | %s | precio=%.4f | posicion=%s",
+                    symbol,
+                    REGIME_STRATEGY_TAG,
+                    "buy" if sig.allowed else "hold",
+                    sig.reason,
+                    last_price,
+                    "sí" if has_long else "no",
+                )
+                if not sig.allowed:
+                    continue
+                cache = self.cache[symbol]
+                cache.signal = Signal.BUY
+                cache.signal_detail = sig.reason
+                cache.trend = "bull"
+                cache.entry_score = float(entry_score_min_for(settings, symbol)) + 20.0
+                cache.entry_score_detail = REGIME_STRATEGY_TAG
+                tape = engine.live_tape(symbol, fallback_price=last_price)
+                scan = SymbolEntryScan(
+                    bars=bars_1h,
+                    tape=tape,
+                    last_price=last_price,
+                    position=position,
+                    has_long=has_long,
+                    last_sl_mult=settings.crypto_asymmetric_sl_atr_mult,
+                    entry_strategy=REGIME_STRATEGY_TAG,
+                )
+                self._execute_entry_symbol(
+                    symbol,
+                    account,
+                    positions,
+                    scan,
+                    focus_symbol=None,
+                )
+                self._note_crypto_entry_today()
+            except RateLimitError as exc:
+                logger.warning("%s | capa régimen 1H rate limit | %s", symbol, exc)
+            except Exception as exc:
+                logger.warning("%s | capa régimen 1H fallo: %s", symbol, exc)
+            self._sleep_between_crypto_symbols(self.active_symbols, index)
 
     def _layer_crypto_asymmetric(self) -> None:
         """Entrada cripto asimétrica 1H + confirmación 4H."""
@@ -967,6 +1065,8 @@ class MultiTimeframeEngine:
             "entry": max(settings.tf_entry_seconds, entry_secs),
             "9m": settings.tf_9m_seconds,
         }
+        if self._crypto_runtime() and settings.crypto_regime_entry_enabled:
+            intervals["1h"] = int(settings.crypto_asymmetric_tick_seconds)
         changed = intervals != self.scheduler.intervals
         self.scheduler.intervals = intervals
         if reset or changed:

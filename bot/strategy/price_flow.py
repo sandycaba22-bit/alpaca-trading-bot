@@ -17,6 +17,7 @@ _PULLBACK_FLOW = frozenset(
 )
 # sync_entry ya valida impulso en velas cerradas; no repetir "ruptura ágil" en tape.
 _SYNC_ENTRY_FLOW = frozenset({"sync_entry"})
+_REGIME_ENTRY_FLOW = frozenset({"trend_4h_sma50_atr_exp_1.2"})
 
 
 class PriceFlowFilter:
@@ -115,6 +116,10 @@ class PriceFlowFilter:
         key = str(ctx.entry_strategy or "").strip().lower()
         return key in _SYNC_ENTRY_FLOW
 
+    def _is_regime_entry(self, ctx: StrategyContext) -> bool:
+        key = str(ctx.entry_strategy or "").strip().lower()
+        return key in _REGIME_ENTRY_FLOW
+
     def confirm(self, signal: Signal, ctx: StrategyContext) -> tuple[bool, str]:
         if signal is Signal.HOLD:
             return False, "hold"
@@ -127,7 +132,8 @@ class PriceFlowFilter:
         zone_pct = self._zone_buffer_pct(ctx)
         pullback_entry = self._is_pullback_entry(ctx)
         sync_entry = self._is_sync_entry(ctx)
-        tape_relaxed = pullback_entry or sync_entry
+        regime_entry = self._is_regime_entry(ctx)
+        tape_relaxed = pullback_entry or sync_entry or regime_entry
         trigger_ready, trigger_reason = self._trigger_ready(signal, ctx, zone_pct)
         spread_limit = self.max_spread_pct * (2.0 if trigger_ready or tape_relaxed else 1.0)
 

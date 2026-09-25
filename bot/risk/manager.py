@@ -74,7 +74,9 @@ class RiskManager:
                     min_tp_pct=settings.min_tp_pct,
                 )
             if is_crypto_symbol(symbol):
-                if settings.crypto_asymmetric_live_enabled:
+                from bot.market.crypto_runtime import crypto_uses_asymmetric_exits
+
+                if crypto_uses_asymmetric_exits(settings, symbol):
                     return StopTakeProfitPolicy(
                         stop_loss_pct=policy.stop_loss_pct,
                         take_profit_pct=0.99,
