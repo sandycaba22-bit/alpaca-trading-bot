@@ -55,6 +55,9 @@ class Settings:
     tf_3m_seconds: int
     tf_entry_seconds: int
     stock_entry_timeframe: str
+    stock_regime_timeframe: str
+    stock_entry_signal_volume_mult: float
+    stock_entry_volume_period: int
     tf_9m_seconds: int
     tf_spike_threshold_pct: float
     tf_macro_strong_pct: float
@@ -422,6 +425,21 @@ def load_settings(env_path: Path | None = None) -> Settings:
             os.getenv("TF_ENTRY_SECONDS"), 300, min_value=120, max_value=1800, name="TF_ENTRY_SECONDS"
         ),
         stock_entry_timeframe=sanitize_timeframe(os.getenv("STOCK_ENTRY_TIMEFRAME"), "5Min"),
+        stock_regime_timeframe=sanitize_timeframe(os.getenv("STOCK_REGIME_TIMEFRAME"), "9Min"),
+        stock_entry_signal_volume_mult=bounded_float(
+            os.getenv("STOCK_ENTRY_VOL_MULT"),
+            0.0,
+            min_value=0.0,
+            max_value=5.0,
+            name="STOCK_ENTRY_VOL_MULT",
+        ),
+        stock_entry_volume_period=bounded_int(
+            os.getenv("STOCK_ENTRY_VOLUME_PERIOD"),
+            20,
+            min_value=5,
+            max_value=60,
+            name="STOCK_ENTRY_VOLUME_PERIOD",
+        ),
         tf_9m_seconds=bounded_int(os.getenv("TF_9M_SECONDS"), 540, min_value=180, max_value=3600, name="TF_9M_SECONDS"),
         tf_spike_threshold_pct=bounded_float(
             os.getenv("TF_SPIKE_THRESHOLD_PCT"), 0.005, min_value=0.001, max_value=0.05, name="TF_SPIKE_THRESHOLD_PCT"

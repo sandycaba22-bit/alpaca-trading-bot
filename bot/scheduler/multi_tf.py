@@ -30,6 +30,7 @@ from bot.strategy.crypto_asymmetric import (
     params_from_settings,
     resample_4h_from_1h,
 )
+from bot.strategy.stock_entry_volume import check_stock_entry_signal_volume
 from bot.strategy.sync_entry import STRATEGY_TAG, evaluate_sync_entry
 from bot.strategy.multi_tf_analysis import (
     MacroSnapshot,
@@ -750,6 +751,26 @@ class MultiTimeframeEngine:
                 self._regime_timeframe(symbol),
             )
 
+        entry_strategy = scan.entry_strategy
+        if (
+            signal is Signal.BUY
+            and settings.bot_profile == "stocks"
+            and not settings.sync_entry_enabled
+            and float(settings.stock_entry_signal_volume_mult) > 0
+        ):
+            vol_ok, vol_detail = check_stock_entry_signal_volume(
+                bars,
+                entry_tf=self._signal_timeframe(symbol),
+                settings=settings,
+            )
+            if not vol_ok:
+                logger.info("%s | BUY filtrada por %s", symbol, vol_detail)
+                cache.signal_detail = f"{detail} | {vol_detail}"
+                engine._notify_signal_filtered(symbol, signal, vol_detail)
+                return
+            logger.info("%s | %s", symbol, vol_detail)
+            entry_strategy = "vol_2x"
+
         profile = settings.bot_profile
         profile_positions = filter_positions_for_profile(positions, profile)
         open_for_profile = count_open_positions_for_profile(positions, profile)
@@ -764,7 +785,7 @@ class MultiTimeframeEngine:
             position,
             signal,
             atr_sl_mult=last_sl_mult,
-            entry_strategy=scan.entry_strategy,
+            entry_strategy=entry_strategy,
         )
 
     def run_all_layers_once(self) -> None:
@@ -912,7 +933,7 @@ class MultiTimeframeEngine:
     def _regime_timeframe(self, symbol: str) -> str:
         if is_crypto_symbol(symbol):
             return self.engine.settings.crypto_regime_timeframe
-        return "9Min"
+        return self.engine.settings.stock_regime_timeframe
 
     def _higher_confirmation_timeframe(self, symbol: str) -> str:
         if is_crypto_symbol(symbol):

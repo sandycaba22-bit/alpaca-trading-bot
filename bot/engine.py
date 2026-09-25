@@ -359,6 +359,20 @@ class TradingEngine:
                     "Cripto entradas OFF — asimétrico 1H/4H apagado (CRYPTO_ASYMMETRIC_LIVE_ENABLED=false)"
                 )
         if self.settings.bot_profile == "stocks":
+            if (
+                not self.settings.sync_entry_enabled
+                and float(self.settings.stock_entry_signal_volume_mult) > 0
+            ):
+                logger.info(
+                    "Acciones entrada vol_2x | multi-régimen %s + régimen %s + confirm %s | "
+                    "vol señal >= %.2fx (periodo %s) | SMA lenta=%s",
+                    self.settings.stock_entry_timeframe,
+                    self.settings.stock_regime_timeframe,
+                    self.settings.confirm_higher_tf,
+                    self.settings.stock_entry_signal_volume_mult,
+                    self.settings.stock_entry_volume_period,
+                    self.settings.sma_slow,
+                )
             if self.settings.stock_asymmetric_exits_enabled:
                 logger.info(
                     "Acciones asimétrico | LIVE ON | SL=%.2fx ATR | trail=%.2fx ATR "
