@@ -57,6 +57,44 @@ GATE_FULL_4H_ATR12 = CryptoRegimeGate(
     atr_expansion_period=20,
 )
 
+WF_OOS_STARTS = (
+    "2022-07-01",
+    "2023-04-01",
+    "2024-01-01",
+    "2024-10-01",
+    "2025-07-01",
+)
+
+
+def gate_sma50_atr_exp(atr_expansion_mult: float) -> CryptoRegimeGate:
+    tag = f"trend_4h_sma50_atr_exp_{atr_expansion_mult:.2f}"
+    return CryptoRegimeGate(
+        name=tag,
+        htf_mode="4h",
+        htf_fast=9,
+        htf_slow=50,
+        atr_expansion_mult=atr_expansion_mult,
+        atr_expansion_period=20,
+    )
+
+
+def walkforward_windows(
+    end: pd.Timestamp,
+) -> list[tuple[int, pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]]:
+    windows: list[tuple[int, pd.Timestamp, pd.Timestamp, pd.Timestamp, pd.Timestamp]] = []
+    oos_starts = [pd.Timestamp(s, tz="UTC") for s in WF_OOS_STARTS]
+    for i, oos_start in enumerate(oos_starts):
+        if oos_start >= end:
+            break
+        oos_end = oos_starts[i + 1] - pd.Timedelta(hours=1) if i + 1 < len(oos_starts) else end
+        if oos_end <= oos_start:
+            continue
+        is_end = oos_start - pd.Timedelta(hours=1)
+        if is_end <= CRYPTO_IS_START:
+            continue
+        windows.append((i + 1, CRYPTO_IS_START, is_end, oos_start, oos_end))
+    return windows
+
 
 def run_crypto_regime_period(
     settings: Settings,

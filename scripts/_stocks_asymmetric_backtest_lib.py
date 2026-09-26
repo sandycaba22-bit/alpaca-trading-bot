@@ -104,7 +104,16 @@ def policy_baseline(settings: Settings) -> StopTakeProfitPolicy:
     )
 
 
-def policy_asymmetric(settings: Settings) -> StopTakeProfitPolicy:
+def policy_asymmetric(
+    settings: Settings,
+    *,
+    breakeven_buffer_atr_mult: float | None = None,
+) -> StopTakeProfitPolicy:
+    buf_atr = (
+        settings.breakeven_buffer_atr_mult
+        if breakeven_buffer_atr_mult is None
+        else float(breakeven_buffer_atr_mult)
+    )
     return StopTakeProfitPolicy(
         stop_loss_pct=settings.stop_loss_pct,
         take_profit_pct=settings.take_profit_pct,
@@ -116,7 +125,7 @@ def policy_asymmetric(settings: Settings) -> StopTakeProfitPolicy:
         breakeven_activate_pct=settings.breakeven_activate_pct,
         breakeven_activate_atr_mult=settings.breakeven_activate_atr_mult,
         breakeven_buffer=settings.breakeven_buffer,
-        breakeven_buffer_atr_mult=settings.breakeven_buffer_atr_mult,
+        breakeven_buffer_atr_mult=buf_atr,
         min_tp_pct=0.0,
         min_stop_pct=settings.stock_min_stop_pct,
         use_breakeven_lock=True,
@@ -296,9 +305,10 @@ def evaluate_variant_symbol(
     end: pd.Timestamp,
     fee_pct: float,
     slippage_pct: float,
+    breakeven_buffer_atr_mult: float | None = None,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """IS + OOS con salidas asimétricas fijas."""
-    asym = policy_asymmetric(settings)
+    asym = policy_asymmetric(settings, breakeven_buffer_atr_mult=breakeven_buffer_atr_mult)
     entries = precompute_entries(
         settings,
         symbol,
