@@ -35,8 +35,11 @@ from _stocks_asymmetric_backtest_lib import (
     summarize_trades,
 )
 
+from _research_universe import LIQUID_STOCK_SYMBOLS  # noqa: E402
+
 STOCK_IS_START = pd.Timestamp("2020-01-01", tz="UTC")
-STOCK_SYMBOLS = ("AAPL", "MSFT", "SLV", "TSLA", "NVDA", "GOOGL", "META")
+
+STOCK_SYMBOLS = LIQUID_STOCK_SYMBOLS
 VOL2X = EntryVariant(name="vol_2x", volume_mult=2.0, volume_period=20, sma_slow=50)
 STOCK_FEE = 0.0
 STOCK_SLIP = 0.03

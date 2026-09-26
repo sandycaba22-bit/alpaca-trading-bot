@@ -36,13 +36,14 @@ from _multi_asset_meanrev_lib import (
     metrics_stock_is_oos,
     run_crypto_meanrev_period,
 )
+from _research_universe import LIQUID_CRYPTO_SYMBOLS, LIQUID_STOCK_SYMBOLS
 from _stocks_asymmetric_backtest_lib import CONFIRM_TF, ENTRY_TF, OOS_START, load_bars, pf_str
 
 OUT_CSV = PROJECT_ROOT / "logs" / "multi_asset_meanrev_backtest.csv"
 OUT_TXT = PROJECT_ROOT / "logs" / "multi_asset_meanrev_backtest_summary.txt"
 
-CRYPTO_DEFAULT = ("ETH/USD", "BTC/USD")
-STOCKS_DEFAULT = ("AAPL", "MSFT", "NVDA", "GOOGL", "META", "TSLA", "SLV")
+CRYPTO_DEFAULT = LIQUID_CRYPTO_SYMBOLS
+STOCKS_DEFAULT = LIQUID_STOCK_SYMBOLS
 
 
 def _row(
@@ -157,22 +158,52 @@ def main() -> int:
         w.writeheader()
         w.writerows(rows)
 
+    symbols_order = list(args.crypto) + [s.upper() for s in args.stocks]
     lines = [
         "=== Multi-activo mean-rev backtest (research) ===",
         f"Generated UTC: {datetime.now(timezone.utc).isoformat()}",
+        "Acciones: 5Min + 15Min | IS 2020-01-01->2025-01-01 | OOS 2025-01-01->hoy",
+        "Cripto: 1H + 4H | IS 2021-01-01->2025-01-01 | OOS 2025-01-01->hoy",
         "",
-        f"{'Cls':<7} {'Sym':<10} {'Scope':<10} {'tr':>5} {'win%':>6} {'PF':>6} {'net%':>8}",
-        "-" * 56,
+        f"{'Symbol':<10} {'Scope':<5} {'tr':>5} {'win%':>6} {'PF':>6} {'net%':>8}",
+        "-" * 48,
     ]
-    for r in rows:
-        if str(r["scope"]).startswith("WF"):
+    for sym in symbols_order:
+        asset = "crypto" if "/" in sym else "stock"
+        for scope in ("IS", "OOS"):
+            match = [
+                r
+                for r in rows
+                if r["symbol"] == sym and r["scope"] == scope and r["asset_class"] == asset
+            ]
+            if not match:
+                continue
+            r = match[0]
+            lines.append(
+                f"{sym:<10} {scope:<5} {r['trades']:>5} {r['win_pct']:>6.1f} "
+                f"{r['pf']:>6.2f} {r['net_pct']:>+8.2f}"
+            )
+    lines.extend(["", "=== Candidatos OOS (PF>1 y net%>0, scope OOS split 335031) ==="])
+    picks: list[str] = []
+    for sym in symbols_order:
+        asset = "crypto" if "/" in sym else "stock"
+        oos = next((r for r in rows if r["symbol"] == sym and r["scope"] == "OOS" and r["asset_class"] == asset), None)
+        if not oos or int(oos["trades"]) == 0:
             continue
-        lines.append(
-            f"{r['asset_class']:<7} {r['symbol']:<10} {r['scope']:<10} {r['trades']:>5} "
-            f"{r['win_pct']:>6.1f} {r['pf']:>6.2f} {r['net_pct']:>+8.2f}"
-        )
+        if float(oos["pf"]) > 1.0 and float(oos["net_pct"]) > 0:
+            picks.append(sym)
+            lines.append(
+                f"  OK  {sym:<10} tr={oos['trades']:>4} PF={oos['pf']:.2f} net%={oos['net_pct']:+.2f}"
+            )
+        else:
+            lines.append(
+                f"  --  {sym:<10} tr={oos['trades']:>4} PF={oos['pf']:.2f} net%={oos['net_pct']:+.2f}"
+            )
+    lines.append("")
+    lines.append(f"Pasaron OOS: {', '.join(picks) if picks else '(ninguno)'}")
 
     OUT_TXT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n" + "\n".join(lines), flush=True)
     print(f"\nWrote {OUT_CSV}", flush=True)
     print(f"Wrote {OUT_TXT}", flush=True)
     return 0

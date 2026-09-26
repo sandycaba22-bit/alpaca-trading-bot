@@ -11,6 +11,7 @@ IS acciones: 2020-01-01 → 2025-01-01 | OOS: 2025-01-01 → hoy
 IS cripto:  2021-01-01 → 2025-01-01 | OOS: 2025-01-01 → hoy
 
   .venv/bin/python -u scripts/_sweep_vol2x_universe.py
+  .venv/bin/python -u scripts/_sweep_vol2x_universe.py --skip-crypto
 """
 
 from __future__ import annotations
@@ -49,22 +50,13 @@ from _stocks_asymmetric_backtest_lib import (  # noqa: E402
     pf_str,
 )
 
+from _research_universe import LIQUID_CRYPTO_SYMBOLS, LIQUID_STOCK_SYMBOLS  # noqa: E402
+
 STOCK_IS_START = pd.Timestamp("2020-01-01", tz="UTC")
 CRYPTO_IS_START = pd.Timestamp("2021-01-01", tz="UTC")
-STOCK_SYMBOLS_DEFAULT = (
-    "AAPL",
-    "MSFT",
-    "NVDA",
-    "AMZN",
-    "GOOGL",
-    "META",
-    "TSLA",
-    "JPM",
-    "XOM",
-    "GLD",
-    "SLV",
-)
-CRYPTO_SYMBOLS_DEFAULT = ("BTC/USD",)
+
+STOCK_SYMBOLS_DEFAULT = LIQUID_STOCK_SYMBOLS
+CRYPTO_SYMBOLS_DEFAULT = LIQUID_CRYPTO_SYMBOLS
 VOL2X = EntryVariant(name="vol_2x", volume_mult=2.0, volume_period=20, sma_slow=50)
 STOCK_FEE = 0.0
 STOCK_SLIP = 0.03
@@ -204,8 +196,8 @@ def _summary_lines(rows: list[dict], stock_symbols: list[str], crypto_symbols: l
         "=== vol_2x universe sweep (research) ===",
         f"Generated UTC: {datetime.now(timezone.utc).isoformat()}",
         "",
-        "Acciones: IS 2020-01-01→2025-01-01 | OOS 2025-01-01→hoy | SMA50 | salidas 1.2/2.75",
-        "Cripto:   IS 2021-01-01→2025-01-01 | OOS 2025-01-01→hoy | salidas asimétricas 1H/4H",
+        "Acciones: IS 2020-01-01->2025-01-01 | OOS 2025-01-01->hoy | SMA50 | salidas 1.2/2.75",
+        "Cripto:   IS 2021-01-01->2025-01-01 | OOS 2025-01-01->hoy | salidas asimétricas 1H/4H",
         "",
         f"{'Symbol':<10} {'Scope':<5} {'tr':>5} {'win%':>6} {'PF':>6} {'net%':>8}",
         "-" * 48,
@@ -225,7 +217,7 @@ def _summary_lines(rows: list[dict], stock_symbols: list[str], crypto_symbols: l
                 f"{sym:<10} {scope:<5} {r['trades']:>5} {r['win_pct']:>6.1f} "
                 f"{r['pf']:>6.2f} {r['net_pct']:>+8.2f}"
             )
-    lines.extend(["", "=== Candidatos producción (PF>1 y net%>0 en OOS) ==="])
+    lines.extend(["", "=== Candidatos OOS (PF>1 y net%>0) ==="])
     picks: list[str] = []
     for sym in stock_symbols + crypto_symbols:
         asset = "crypto" if "/" in sym else "stocks"
@@ -238,10 +230,19 @@ def _summary_lines(rows: list[dict], stock_symbols: list[str], crypto_symbols: l
             None,
         )
         if not oos or int(oos["trades"]) == 0:
+            lines.append(f"  --  {sym:<10} (sin trades OOS)")
             continue
         if float(oos["pf"]) > 1.0 and float(oos["net_pct"]) > 0:
             picks.append(sym)
-    lines.append(", ".join(picks) if picks else "(ninguno cumple PF>1 y net positivo OOS)")
+            lines.append(
+                f"  OK  {sym:<10} tr={oos['trades']:>4} PF={oos['pf']:.2f} net%={oos['net_pct']:+.2f}"
+            )
+        else:
+            lines.append(
+                f"  --  {sym:<10} tr={oos['trades']:>4} PF={oos['pf']:.2f} net%={oos['net_pct']:+.2f}"
+            )
+    lines.append("")
+    lines.append(f"Pasaron OOS: {', '.join(picks) if picks else '(ninguno)'}")
     return lines
 
 
@@ -249,7 +250,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--end", default=None, help="Fin OOS UTC (default: ahora)")
     parser.add_argument("--stock-symbols", nargs="+", default=list(STOCK_SYMBOLS_DEFAULT))
-    parser.add_argument("--crypto-symbols", nargs="+", default=list(CRYPTO_SYMBOLS_DEFAULT))
+    parser.add_argument(
+        "--crypto-symbols",
+        nargs="+",
+        default=list(CRYPTO_SYMBOLS_DEFAULT),
+        help="Pares cripto (default: BTC/USD). Ignorado si --skip-crypto.",
+    )
+    parser.add_argument(
+        "--skip-crypto",
+        action="store_true",
+        help="Solo acciones 5Min/15Min (sin BTC ni otros pares cripto).",
+    )
     args = parser.parse_args()
 
     end = (
@@ -258,7 +269,7 @@ def main() -> int:
         else pd.Timestamp(datetime.now(timezone.utc))
     )
     stock_symbols = [s.upper() for s in args.stock_symbols]
-    crypto_symbols = list(args.crypto_symbols)
+    crypto_symbols = [] if args.skip_crypto else list(args.crypto_symbols)
 
     settings = load_settings()
     client = AlpacaClient(settings)
@@ -274,11 +285,14 @@ def main() -> int:
         f"OOS {OOS_START.date()} -> {end.date()}",
         flush=True,
     )
-    print(
-        f"Cripto IS {CRYPTO_IS_START.date()} -> {OOS_START.date()} | "
-        f"OOS {OOS_START.date()} -> {end.date()}",
-        flush=True,
-    )
+    if args.skip_crypto:
+        print("Cripto: omitido (--skip-crypto)", flush=True)
+    else:
+        print(
+            f"Cripto IS {CRYPTO_IS_START.date()} -> {OOS_START.date()} | "
+            f"OOS {OOS_START.date()} -> {end.date()}",
+            flush=True,
+        )
     print("=" * 88, flush=True)
 
     rows: list[dict] = []
@@ -310,7 +324,10 @@ def main() -> int:
         _append_row(rows, asset_class="stocks", symbol=symbol, scope="IS", m=m_is)
         _append_row(rows, asset_class="stocks", symbol=symbol, scope="OOS", m=m_oos)
 
-    print("\n--- CRIPTO (vol_2x sobre entrada 1H/4H) ---", flush=True)
+    if not crypto_symbols:
+        print("\n--- CRIPTO: omitido ---", flush=True)
+    else:
+        print("\n--- CRIPTO (vol_2x sobre entrada 1H/4H) ---", flush=True)
     for symbol in crypto_symbols:
         print(f"\n>> {symbol}", flush=True)
         bars_1h = load_1h(market, symbol, CRYPTO_IS_START.to_pydatetime(), end.to_pydatetime())
