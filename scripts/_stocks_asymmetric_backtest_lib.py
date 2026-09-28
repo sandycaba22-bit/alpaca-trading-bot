@@ -306,8 +306,10 @@ def evaluate_variant_symbol(
     fee_pct: float,
     slippage_pct: float,
     breakeven_buffer_atr_mult: float | None = None,
+    oos_start: pd.Timestamp | None = None,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """IS + OOS con salidas asimétricas fijas."""
+    split = oos_start if oos_start is not None else OOS_START
     asym = policy_asymmetric(settings, breakeven_buffer_atr_mult=breakeven_buffer_atr_mult)
     entries = precompute_entries(
         settings,
@@ -320,7 +322,7 @@ def evaluate_variant_symbol(
         quiet=True,
     )
     cash0 = float(settings.backtest_cash)
-    is_end = OOS_START - pd.Timedelta(minutes=5)
+    is_end = split - pd.Timedelta(minutes=5)
     is_trades = simulate_trades(
         settings,
         bars,
@@ -340,7 +342,7 @@ def evaluate_variant_symbol(
         symbol=symbol,
         fee_pct=fee_pct,
         slippage_pct=slippage_pct,
-        period_start=OOS_START,
+        period_start=split,
         period_end=end,
     )
     m_is = summarize_trades(is_trades, cash0)
@@ -348,6 +350,74 @@ def evaluate_variant_symbol(
     m_is["symbol"] = symbol
     m_oos["symbol"] = symbol
     return m_is, m_oos
+
+
+def evaluate_variant_scopes(
+    settings: Settings,
+    bars: pd.DataFrame,
+    htf: pd.DataFrame,
+    symbol: str,
+    sma_slow_by_symbol: dict[str, int],
+    variant: EntryVariant | None,
+    *,
+    is_start: pd.Timestamp,
+    oos_start: pd.Timestamp,
+    end: pd.Timestamp,
+    fee_pct: float,
+    slippage_pct: float,
+    include_full: bool = True,
+    yearly_from: int | None = None,
+    yearly_to: int | None = None,
+) -> list[tuple[str, dict[str, float]]]:
+    """Métricas por scope: IS, OOS, FULL y opcionalmente un año calendario (2022…)."""
+    asym = policy_asymmetric(settings)
+    entries = precompute_entries(
+        settings,
+        symbol,
+        bars,
+        htf,
+        sma_slow_by_symbol,
+        variant=variant,
+        exit_policy=asym,
+        quiet=True,
+    )
+    cash0 = float(settings.backtest_cash)
+    is_end = oos_start - pd.Timedelta(minutes=5)
+
+    def _run(scope: str, p0: pd.Timestamp, p1: pd.Timestamp) -> tuple[str, dict[str, float]]:
+        trades = simulate_trades(
+            settings,
+            bars,
+            entries,
+            asym,
+            symbol=symbol,
+            fee_pct=fee_pct,
+            slippage_pct=slippage_pct,
+            period_start=p0,
+            period_end=p1,
+        )
+        m = summarize_trades(trades, cash0)
+        m["symbol"] = symbol
+        return scope, m
+
+    out: list[tuple[str, dict[str, float]]] = [
+        _run("IS", is_start, is_end),
+        _run("OOS", oos_start, end),
+    ]
+    if include_full:
+        out.append(_run("FULL", is_start, end))
+    if yearly_from is not None and yearly_to is not None:
+        for year in range(int(yearly_from), int(yearly_to) + 1):
+            y0 = pd.Timestamp(f"{year}-01-01", tz="UTC")
+            y1 = pd.Timestamp(f"{year}-12-31 23:59:59", tz="UTC")
+            if y1 > end:
+                y1 = end
+            if y0 > end:
+                continue
+            if y0 < is_start:
+                y0 = is_start
+            out.append(_run(str(year), y0, y1))
+    return out
 
 
 def simulate_trades(

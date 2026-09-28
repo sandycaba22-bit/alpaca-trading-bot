@@ -55,3 +55,11 @@ source .venv/bin/activate
 python -u scripts/_sweep_vol2x_top50.py
 # logs/vol2x_top50_sweep.csv
 ```
+
+Ventana **2022–2026** (IS/OOS/FULL + opcional por año):
+
+```bash
+ENV_FILE=.env.stocks_top50 python -u scripts/sweep_top50_2022_2026.py
+ENV_FILE=.env.stocks_top50 python -u scripts/sweep_top50_2022_2026.py --yearly
+# logs/vol2x_top50_2022_2026_sweep.csv
+```
