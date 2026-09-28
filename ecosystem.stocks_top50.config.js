@@ -1,9 +1,6 @@
 /**
- * PM2 — bot cripto (paper only) + panel :3001
- *
- *   cp deploy/crypto.env.example .env.crypto   # completar credenciales
- *   pm2 start ecosystem.crypto.cjs
- *   pm2 save
+ * PM2 — bot secundario Top 50 acciones (paper) + panel :3001
+ * Reemplaza el antiguo bot cripto. Usar: pm2 start ecosystem.stocks_top50.config.js
  */
 const fs = require('fs');
 const path = require('path');
@@ -22,7 +19,7 @@ const LOCAL_DISABLED = fs.existsSync(path.join(ROOT, 'data', 'LOCAL_DISABLED'));
 module.exports = {
   apps: LOCAL_DISABLED ? [] : [
     {
-      name: 'trading-web-crypto',
+      name: 'trading-web-stocks-top50',
       cwd: path.join(ROOT, 'web'),
       script: 'server.js',
       interpreter: 'node',
@@ -38,17 +35,17 @@ module.exports = {
         NODE_ENV: 'production',
         HOST: '0.0.0.0',
         PORT: '3001',
-        ENV_FILE: '.env.crypto',
-        PM2_APP_NAME: 'trading-bot-crypto',
-        DATA_DIR: 'data-crypto',
+        ENV_FILE: '.env.stocks_top50',
+        PM2_APP_NAME: 'trading-bot-stocks-top50',
+        DATA_DIR: 'data-stocks-top50',
       },
-      error_file: path.join(LOG_DIR, 'pm2-web-crypto-error.log'),
-      out_file: path.join(LOG_DIR, 'pm2-web-crypto-out.log'),
+      error_file: path.join(LOG_DIR, 'pm2-web-stocks-top50-error.log'),
+      out_file: path.join(LOG_DIR, 'pm2-web-stocks-top50-out.log'),
       merge_logs: true,
       time: true,
     },
     {
-      name: 'trading-bot-crypto',
+      name: 'trading-bot-stocks-top50',
       cwd: ROOT,
       script: 'run_bot.py',
       interpreter: PYTHON,
@@ -64,10 +61,10 @@ module.exports = {
       env: {
         PYTHONUNBUFFERED: '1',
         BOT_STARTUP_SOURCE: 'pm2',
-        ENV_FILE: '.env.crypto',
+        ENV_FILE: '.env.stocks_top50',
       },
-      error_file: path.join(LOG_DIR, 'pm2-bot-crypto-error.log'),
-      out_file: path.join(LOG_DIR, 'pm2-bot-crypto-out.log'),
+      error_file: path.join(LOG_DIR, 'pm2-bot-stocks-top50-error.log'),
+      out_file: path.join(LOG_DIR, 'pm2-bot-stocks-top50-out.log'),
       merge_logs: true,
       time: true,
     },

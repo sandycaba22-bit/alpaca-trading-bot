@@ -1,19 +1,8 @@
-"""Universo research: líquidos US + BTC (IS/OOS backtests)."""
+"""Universo research — reexporta desde bot.universe."""
 
 from __future__ import annotations
 
-# Acciones 5Min/15Min (vol_2x, mean-rev research)
-LIQUID_STOCK_SYMBOLS: tuple[str, ...] = (
-    "NVDA",
-    "AAPL",
-    "MSFT",
-    "QQQ",
-    "SPY",
-    "GOOGL",
-    "META",
-    "TSLA",
-    "SLV",
-)
+from bot.universe import ELITE_STOCK_SYMBOLS, TOP50_US_STOCK_SYMBOLS
 
-# Cripto feed Alpaca
-LIQUID_CRYPTO_SYMBOLS: tuple[str, ...] = ("BTC/USD",)
+# Compat: scripts que importaban LIQUID_STOCK_SYMBOLS
+LIQUID_STOCK_SYMBOLS = ELITE_STOCK_SYMBOLS

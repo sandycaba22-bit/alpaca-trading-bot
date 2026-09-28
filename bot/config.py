@@ -15,7 +15,6 @@ from bot.security.sanitize import (
     sanitize_api_base_url,
     sanitize_log_level,
     sanitize_symbols,
-    sanitize_crypto_symbols,
     sanitize_telegram_chat_id,
     sanitize_telegram_token,
     sanitize_timeframe,
@@ -256,37 +255,18 @@ class Settings:
             raise ValidationError("SMA_FAST debe ser menor que SMA_SLOW")
         if self.crypto_sma_fast >= self.crypto_sma_slow:
             raise ValidationError("CRYPTO_SMA_FAST debe ser menor que CRYPTO_SMA_SLOW")
-        if self.bot_profile == "stocks" and not self.stock_symbols:
-            raise ValidationError("BOT_PROFILE=stocks requiere SYMBOLS")
-        if self.bot_profile == "crypto" and not self.crypto_symbols:
-            raise ValidationError("BOT_PROFILE=crypto requiere CRYPTO_SYMBOLS")
-        if self.bot_profile == "crypto" and not self.paper:
-            raise ValidationError(
-                "BOT_PROFILE=crypto exige cuenta paper (APCA_API_BASE_URL paper)"
-            )
-        if self.crypto_regime_entry_enabled:
-            if not self.paper:
-                raise ValidationError(
-                    "CRYPTO_REGIME_ENTRY_ENABLED requiere cuenta paper (APCA_API_BASE_URL paper)"
-                )
-            if not self.crypto_regime_entry_symbols:
-                raise ValidationError(
-                    "CRYPTO_REGIME_ENTRY_ENABLED requiere CRYPTO_REGIME_ENTRY_SYMBOLS (ej. ETH/USD)"
-                )
-            from bot.market.assets import normalize_symbol
-
-            allowed = {normalize_symbol(s) for s in self.crypto_symbols}
-            for sym in self.crypto_regime_entry_symbols:
-                if normalize_symbol(sym) not in allowed:
-                    raise ValidationError(
-                        f"CRYPTO_REGIME_ENTRY_SYMBOLS incluye {sym!r} fuera de CRYPTO_SYMBOLS"
-                    )
+        if self.bot_profile in {"stocks", "stocks_top50"} and not self.stock_symbols:
+            raise ValidationError(f"BOT_PROFILE={self.bot_profile} requiere SYMBOLS")
 
 
 def _parse_bot_profile(raw: str | None) -> str:
-    value = (raw or "hybrid").strip().lower()
-    if value not in {"stocks", "crypto", "hybrid"}:
-        raise ValidationError(f"BOT_PROFILE invalido: {value!r} (stocks|crypto|hybrid)")
+    value = (raw or "stocks").strip().lower()
+    if value == "crypto":
+        value = "stocks_top50"
+    if value not in {"stocks", "stocks_top50", "hybrid"}:
+        raise ValidationError(
+            f"BOT_PROFILE invalido: {value!r} (stocks|stocks_top50|hybrid)"
+        )
     return value
 
 
@@ -296,18 +276,22 @@ def _resolve_data_dir(profile: str, explicit: str | None) -> Path:
         if not path.is_absolute():
             path = PROJECT_ROOT / path
         return path
-    defaults = {"stocks": "data-stocks", "crypto": "data-crypto", "hybrid": "data"}
+    defaults = {
+        "stocks": "data-stocks",
+        "stocks_top50": "data-stocks-top50",
+        "hybrid": "data-stocks",
+    }
     return PROJECT_ROOT / defaults[profile]
 
 
 def _resolve_telegram_prefix(profile: str, explicit: str | None) -> str:
     if explicit and explicit.strip():
         return explicit.strip()[:32]
+    if profile == "stocks_top50":
+        return "[TOP50]"
     if profile == "stocks":
         return "[ACCIONES]"
-    if profile == "crypto":
-        return "[CRIPTO]"
-    return ""
+    return "[ACCIONES]"
 
 
 def _resolve_profile_entry_score_min(
@@ -337,34 +321,12 @@ def _resolve_profile_entry_score_min(
 
 
 def entry_score_min_for(settings: Settings, symbol: str | None = None) -> float:
-    """Umbral de score por perfil / clase de activo (split stocks vs crypto)."""
-    from bot.market.assets import is_crypto_symbol
-
-    sym = str(symbol or "").strip()
-    if sym and is_crypto_symbol(sym):
-        return float(settings.crypto_entry_score_min)
-    if sym and not is_crypto_symbol(sym):
-        return float(settings.stock_entry_score_min)
-    profile = str(settings.bot_profile or "hybrid").strip().lower()
-    if profile == "crypto":
-        return float(settings.crypto_entry_score_min)
-    if profile == "stocks":
-        return float(settings.stock_entry_score_min)
-    return float(settings.entry_score_min)
+    _ = symbol
+    return float(settings.stock_entry_score_min)
 
 
 def capital_protection_max_loss_pct_for(settings: Settings, symbol: str | None) -> float:
-    from bot.market.assets import is_crypto_symbol
-
-    sym = str(symbol or "").strip()
-    if sym and is_crypto_symbol(sym):
-        return float(settings.crypto_capital_protection_max_loss_pct)
-    if settings.bot_profile == "crypto":
-        return float(settings.crypto_capital_protection_max_loss_pct)
-    if sym and not is_crypto_symbol(sym):
-        return float(settings.stock_capital_protection_max_loss_pct)
-    if settings.bot_profile == "stocks":
-        return float(settings.stock_capital_protection_max_loss_pct)
+    _ = symbol
     return float(settings.stock_capital_protection_max_loss_pct)
 
 
@@ -407,16 +369,20 @@ def load_settings(env_path: Path | None = None) -> Settings:
             "No se arranca para evitar mezclar cuentas"
         )
 
-    if bot_profile == "crypto":
-        stock_symbols = sanitize_symbols(os.getenv("SYMBOLS"), allow_empty=True)
+    from bot.universe import ELITE_STOCK_SYMBOLS, TOP50_US_STOCK_SYMBOLS
+
+    if bot_profile == "stocks_top50":
+        default_syms = list(TOP50_US_STOCK_SYMBOLS)
+    elif bot_profile == "stocks":
+        default_syms = list(ELITE_STOCK_SYMBOLS)
     else:
-        stock_symbols = sanitize_symbols(os.getenv("SYMBOLS"), ["AAPL"])
-    if bot_profile == "stocks":
-        crypto_symbols = sanitize_crypto_symbols(os.getenv("CRYPTO_SYMBOLS"), allow_empty=True)
-    else:
-        crypto_symbols = sanitize_crypto_symbols(
-            os.getenv("CRYPTO_SYMBOLS"), ["BTC/USD", "ETH/USD"]
-        )
+        default_syms = ["AAPL"]
+    stock_symbols = sanitize_symbols(
+        os.getenv("SYMBOLS"),
+        default_syms,
+        allow_empty=bot_profile not in {"stocks", "stocks_top50"},
+    )
+    crypto_symbols: list[str] = []
     data_dir = _resolve_data_dir(bot_profile, os.getenv("DATA_DIR"))
     telegram_prefix = _resolve_telegram_prefix(bot_profile, os.getenv("TELEGRAM_PREFIX"))
 
@@ -872,9 +838,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         crypto_regime_entry_enabled=_as_bool(
             os.getenv("CRYPTO_REGIME_ENTRY_ENABLED"), default=False
         ),
-        crypto_regime_entry_symbols=tuple(
-            sanitize_crypto_symbols(os.getenv("CRYPTO_REGIME_ENTRY_SYMBOLS"), allow_empty=True)
-        ),
+        crypto_regime_entry_symbols=(),
         stock_asymmetric_exits_enabled=_as_bool(
             os.getenv("STOCK_ASYMMETRIC_EXITS_ENABLED"), default=False
         ),

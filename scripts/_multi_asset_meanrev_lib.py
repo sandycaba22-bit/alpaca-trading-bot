@@ -9,20 +9,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from bot.config import Settings
-from bot.strategy.crypto_asymmetric import resample_4h_from_1h
 from bot.strategy.indicators import bollinger, last_adx, last_atr
 from bot.strategy.base import Signal
 from bot.strategy.mean_reversion import mean_reversion_criteria
 from bot.strategy.multi_tf_analysis import analyze_trend
 
-from _crypto_asymmetric_backtest_lib import (
-    AsymmetricTrade,
-    _simulate_bar_exits,
-    _size_qty,
-    load_1h,
-    summarize_trades,
-)
-from _crypto_regime_entry_backtest_lib import CRYPTO_IS_START
 from _stocks_asymmetric_backtest_lib import (
     CONFIRM_TF,
     ENTRY_TF,
@@ -38,7 +29,6 @@ STOCK_IS_START = pd.Timestamp("2020-01-01", tz="UTC")
 
 
 class AssetClass(str, Enum):
-    CRYPTO = "crypto"
     STOCK = "stock"
 
 
@@ -54,28 +44,12 @@ class MeanRevResearchConfig:
     # Horas muertas
     stock_skip_open_minutes: int = 30
     stock_skip_lunch: bool = True
-    crypto_dead_utc_hours: tuple[int, ...] = (22, 23, 0, 1, 2, 3, 4, 5)
     # Volumen institucional: exige vol vela >= media * ratio (1.0 = no operar bajo la media)
     volume_period: int = 20
     min_volume_ratio: float = 1.0
     # Mean-reversion / bandas
     max_confirm_adx: float = 26.0
     require_htf_not_bear: bool = True
-
-
-def default_crypto_configs(symbols: list[str]) -> list[MeanRevResearchConfig]:
-    return [
-        MeanRevResearchConfig(
-            symbol=s,
-            asset_class=AssetClass.CRYPTO,
-            entry_tf="1Hour",
-            confirm_tf="4H",
-            fee_pct=0.25,
-            slippage_pct=0.03,
-            is_start=CRYPTO_IS_START,
-        )
-        for s in symbols
-    ]
 
 
 def default_stock_configs(symbols: list[str]) -> list[MeanRevResearchConfig]:
@@ -93,15 +67,6 @@ def default_stock_configs(symbols: list[str]) -> list[MeanRevResearchConfig]:
         )
         for s in symbols
     ]
-
-
-def _in_crypto_dead_hour(ts: pd.Timestamp, dead_hours: tuple[int, ...]) -> bool:
-    if not dead_hours:
-        return False
-    if ts.tzinfo is None:
-        ts = ts.tz_localize("UTC")
-    h = int(ts.tz_convert("UTC").hour)
-    return h in dead_hours
 
 
 def _in_stock_dead_hour(
@@ -162,44 +127,6 @@ def _bb_width_ok(bars: pd.DataFrame, settings: Settings, min_width_atr: float = 
     return width >= min_width_atr * atr_v
 
 
-def precompute_meanrev_entries_crypto(
-    settings: Settings,
-    bars_1h: pd.DataFrame,
-    cfg: MeanRevResearchConfig,
-) -> list[int]:
-    bars_4h = resample_4h_from_1h(bars_1h)
-    params = settings
-    lookback = max(int(settings.lookback_bars), 80, settings.bb_period + settings.rsi_period + 5)
-    entries: list[int] = []
-    for i in range(lookback, len(bars_1h)):
-        ts = bars_1h.index[i - 1]
-        if _in_crypto_dead_hour(ts, cfg.crypto_dead_utc_hours):
-            continue
-        ok_v, _ = _volume_ok(bars_1h, i, cfg.volume_period, cfg.min_volume_ratio)
-        if not ok_v:
-            continue
-        hist = bars_1h.iloc[i - lookback : i]
-        if cfg.require_htf_not_bear:
-            htf = bars_4h.loc[bars_4h.index <= ts].tail(120)
-            trend, _ = analyze_trend(htf if len(htf) > 20 else hist)
-            if trend == "bear":
-                continue
-        htf = bars_4h.loc[bars_4h.index <= ts]
-        if len(htf) >= settings.adx_period + 5:
-            adx_v = last_adx(htf, settings.adx_period)
-            if adx_v is not None and adx_v > cfg.max_confirm_adx:
-                continue
-        if not _bb_width_ok(hist, settings):
-            continue
-        sig, _ = mean_reversion_criteria(
-            hist, settings=settings, has_long=False, symbol=cfg.symbol
-        )
-        if sig is not Signal.BUY:
-            continue
-        entries.append(i)
-    return entries
-
-
 def precompute_meanrev_entries_stock(
     settings: Settings,
     bars: pd.DataFrame,
@@ -242,72 +169,6 @@ def precompute_meanrev_entries_stock(
             continue
         entries.append(i)
     return entries
-
-
-def run_crypto_meanrev_period(
-    settings: Settings,
-    bars: pd.DataFrame,
-    cfg: MeanRevResearchConfig,
-    *,
-    period_start: pd.Timestamp,
-    period_end: pd.Timestamp,
-) -> list[AsymmetricTrade]:
-    from bot.strategy.crypto_asymmetric import params_from_settings
-
-    params = params_from_settings(settings)
-    entries = precompute_meanrev_entries_crypto(settings, bars, cfg)
-    friction = (cfg.fee_pct + cfg.slippage_pct) / 100.0
-    cash0 = float(settings.backtest_cash)
-    period_start_i = int(bars.index.searchsorted(period_start, side="left"))
-    period_end_i = int(bars.index.searchsorted(period_end, side="right")) - 1
-    period_end_i = max(period_start_i, min(period_end_i, len(bars) - 1))
-    trades: list[AsymmetricTrade] = []
-    in_pos_until = period_start_i - 1
-    lookback = max(int(settings.lookback_bars), 80)
-
-    for ei in entries:
-        if ei <= in_pos_until or ei < period_start_i or bars.index[ei] > period_end:
-            continue
-        hist = bars.iloc[max(0, ei - lookback) : ei]
-        atr_val = last_atr(hist, settings.atr_period) or 0.0
-        entry = float(bars["open"].iloc[ei])
-        qty = _size_qty(settings, cash0, entry, params.sl_atr_mult, float(atr_val))
-        if qty <= 0:
-            continue
-        exit_px, exit_j, reason = _simulate_bar_exits(
-            bars, ei, entry, qty, float(atr_val), params, period_end_i
-        )
-        pnl_net = (exit_px - entry) * qty - (entry + exit_px) * qty * friction
-        trades.append(
-            AsymmetricTrade(
-                symbol=cfg.symbol,
-                entry_idx=ei,
-                exit_idx=exit_j,
-                entry_price=entry,
-                exit_price=exit_px,
-                qty=qty,
-                pnl_gross=(exit_px - entry) * qty,
-                pnl_net=pnl_net,
-                exit_reason=reason,
-            )
-        )
-        in_pos_until = exit_j
-    return trades
-
-
-def metrics_crypto_period(
-    settings: Settings,
-    bars: pd.DataFrame,
-    cfg: MeanRevResearchConfig,
-    *,
-    start: pd.Timestamp,
-    end: pd.Timestamp,
-) -> dict[str, float]:
-    tr = run_crypto_meanrev_period(settings, bars, cfg, period_start=start, period_end=end)
-    m = summarize_trades(tr, float(settings.backtest_cash))
-    m["symbol"] = cfg.symbol
-    m["entries_signal"] = float(len(precompute_meanrev_entries_crypto(settings, bars, cfg)))
-    return m
 
 
 def metrics_stock_is_oos(

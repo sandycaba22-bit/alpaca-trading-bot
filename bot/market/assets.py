@@ -1,4 +1,4 @@
-"""Registro de activos: acciones vs cripto."""
+"""Registro de activos: solo acciones US."""
 
 from __future__ import annotations
 
@@ -8,27 +8,18 @@ from bot.config import Settings
 
 
 def normalize_symbol(symbol: str) -> str:
-    """Unifica BTCUSD (broker) con BTC/USD (libro y órdenes cripto)."""
-    raw = str(symbol or "").strip().upper()
-    if not raw:
-        return raw
-    if "/" in raw:
-        return raw
-    if raw.endswith("USD") and len(raw) > 3 and raw[:-3].isalpha():
-        return f"{raw[:-3]}/USD"
-    return raw
+    return str(symbol or "").strip().upper()
 
 
 def is_crypto_symbol(symbol: str) -> bool:
-    return "/" in normalize_symbol(symbol)
+    return False
 
 
 def is_stock_symbol(symbol: str) -> bool:
-    return not is_crypto_symbol(symbol)
+    return bool(normalize_symbol(symbol))
 
 
 def positions_by_symbol(positions: Iterable[Any]) -> dict[str, Any]:
-    """Indexa posiciones del broker por símbolo canónico (BTC/USD, no BTCUSD)."""
     out: dict[str, Any] = {}
     for pos in positions:
         key = normalize_symbol(str(getattr(pos, "symbol", "") or ""))
@@ -41,26 +32,21 @@ def positions_by_symbol(positions: Iterable[Any]) -> dict[str, Any]:
 def all_symbols(settings: Settings) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
-    for sym in list(settings.stock_symbols) + list(settings.crypto_symbols):
+    for sym in list(settings.stock_symbols):
         key = normalize_symbol(sym)
-        if key not in seen:
+        if key and key not in seen:
             seen.add(key)
-            ordered.append(key if is_crypto_symbol(sym) else sym.upper())
+            ordered.append(key)
     return ordered
 
 
 def asset_class_for(symbol: str) -> str:
-    return "crypto" if is_crypto_symbol(symbol) else "stock"
+    return "stock"
 
 
 def position_matches_profile(symbol: str, bot_profile: str) -> bool:
-    """True si el símbolo pertenece al perfil PM2 (stocks / crypto / hybrid=all)."""
-    profile = str(bot_profile or "hybrid").strip().lower()
-    if profile == "hybrid":
-        return True
-    if profile == "crypto":
-        return is_crypto_symbol(symbol)
-    if profile == "stocks":
+    profile = str(bot_profile or "stocks").strip().lower()
+    if profile in {"stocks", "stocks_top50", "hybrid"}:
         return is_stock_symbol(symbol)
     return True
 

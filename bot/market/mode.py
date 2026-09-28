@@ -1,4 +1,4 @@
-"""Modo de operación: acciones en horario NYSE/NASDAQ, cripto fuera de horario y fines de semana."""
+"""Modo de operación: solo acciones US (perfiles stocks / stocks_top50)."""
 
 from __future__ import annotations
 
@@ -10,34 +10,21 @@ from bot.config import Settings
 
 class TradingMode(str, Enum):
     STOCKS = "stocks"
-    CRYPTO = "crypto"
 
 
 def resolve_trading_mode(clock: MarketClockView, settings: Settings) -> tuple[TradingMode, list[str]]:
-    """Acciones cuando el mercado US está abierto; cripto en cierre, noches y fines de semana."""
-    profile = settings.bot_profile
-    if profile == "stocks":
-        return TradingMode.STOCKS, list(settings.stock_symbols)
-    if profile == "crypto":
-        return TradingMode.CRYPTO, list(settings.crypto_symbols)
-    if clock.is_open:
-        return TradingMode.STOCKS, list(settings.stock_symbols)
-    return TradingMode.CRYPTO, list(settings.crypto_symbols)
+    """Lista de acciones del perfil PM2; fuera de horario no se opera."""
+    _ = clock
+    return TradingMode.STOCKS, list(settings.stock_symbols)
 
 
-def trading_mode_label(mode: TradingMode, profile: str = "hybrid") -> str:
-    if profile == "stocks":
-        return "Modo Acciones"
-    if profile == "crypto":
-        return "Modo Cripto"
-    if mode is TradingMode.STOCKS:
-        return "Modo Acciones"
-    return "Modo Cripto Nocturno/Fin de Semana"
+def trading_mode_label(mode: TradingMode, profile: str = "stocks") -> str:
+    _ = mode
+    if profile == "stocks_top50":
+        return "Modo Top 50 Acciones"
+    return "Modo Acciones Elite"
 
 
 def is_symbol_tradable(symbol: str, clock: MarketClockView) -> bool:
-    from bot.market.assets import is_crypto_symbol
-
-    if is_crypto_symbol(symbol):
-        return True
+    _ = symbol
     return bool(clock.is_open)

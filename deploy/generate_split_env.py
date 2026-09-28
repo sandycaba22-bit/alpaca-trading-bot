@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Genera .env.stocks y .env.crypto desde el .env híbrido existente (sin secretos en git)."""
+"""Genera .env.stocks y .env.stocks_top50 desde el .env híbrido existente (sin secretos en git)."""
 
 from __future__ import annotations
 
@@ -71,8 +71,8 @@ def main() -> int:
         f"SCHEDULER_TICK_SECONDS={sched}",
         f"POLL_INTERVAL_SECONDS={poll}",
         "",
-        "SYMBOLS=AAPL,MSFT",
-        "CRYPTO_SYMBOLS=",
+        "SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY",
+        "MAX_SYMBOLS=8",
         "CLOSE_ON_MODE_SWITCH=false",
         "",
         "SMA_FAST=20",
@@ -97,11 +97,15 @@ def main() -> int:
     if paper:
         stocks_lines.insert(1, "# NOTA: usa keys LIVE (AK...) cuando las tengas; ahora corre en paper")
 
-    crypto_lines = [
-        "# Generado por deploy/generate_split_env.py",
-        "BOT_PROFILE=crypto",
-        "DATA_DIR=data-crypto",
-        "TELEGRAM_PREFIX=[CRIPTO]",
+    top50_syms = ",".join(
+        __import__("bot.universe", fromlist=["TOP50_US_STOCK_SYMBOLS"]).TOP50_US_STOCK_SYMBOLS
+    )
+    top50_lines = [
+        "# Generado por deploy/generate_split_env.py — Top 50 paper",
+        "BOT_PROFILE=stocks_top50",
+        "DATA_DIR=data-stocks-top50",
+        "TELEGRAM_PREFIX=[TOP50]",
+        "MAX_SYMBOLS=55",
         "",
         f"APCA_API_KEY_ID={key}",
         f"APCA_API_SECRET_KEY={secret}",
@@ -112,18 +116,15 @@ def main() -> int:
         f"SCHEDULER_TICK_SECONDS={sched}",
         f"POLL_INTERVAL_SECONDS={poll}",
         "",
-        "SYMBOLS=",
-        "CRYPTO_SYMBOLS=BTC/USD,ETH/USD",
+        f"SYMBOLS={top50_syms}",
         "CLOSE_ON_MODE_SWITCH=false",
-        "",
-        "CRYPTO_SMA_FAST=9",
-        "CRYPTO_SMA_SLOW=21",
-        "CRYPTO_BAR_TIMEFRAME=15Min",
-        "CRYPTO_REGIME_TIMEFRAME=30Min",
-        "LOOKBACK_BARS=120",
-        "MAX_OPEN_POSITIONS=2",
-        "POSITION_SIZE_PCT=0.05",
-        "MAX_NOTIONAL_PER_ORDER=2000",
+        "SYNC_ENTRY_ENABLED=false",
+        "STOCK_ENTRY_TIMEFRAME=5Min",
+        "STOCK_REGIME_TIMEFRAME=15Min",
+        "STOCK_ENTRY_VOL_MULT=2.0",
+        "STOCK_ASYMMETRIC_EXITS_ENABLED=true",
+        "STOCK_TRADE_BEST_ONLY=true",
+        "MAX_OPEN_POSITIONS=5",
         "",
         f"TELEGRAM_BOT_TOKEN={tg_token}",
         f"TELEGRAM_CHAT_ID={tg_chat}",
@@ -135,17 +136,12 @@ def main() -> int:
         f"ADMIN_USER={admin_u}",
         f"ADMIN_PASS={admin_p}",
     ]
-    if not paper:
-        crypto_lines.insert(
-            5,
-            "# NOTA: crypto exige paper; si .env era live, pon keys PK... manualmente aqui",
-        )
 
     _write_env(ROOT / ".env.stocks", stocks_lines)
-    _write_env(ROOT / ".env.crypto", crypto_lines)
+    _write_env(ROOT / ".env.stocks_top50", top50_lines)
 
     mode = "paper" if paper else "live"
-    print(f"Listo | fuente=.env ({mode}) | stocks=AAPL,MSFT | crypto=BTC/USD,ETH/USD")
+    print(f"Listo | fuente=.env ({mode}) | elite=6 tickers | top50=50 tickers")
     return 0
 
 

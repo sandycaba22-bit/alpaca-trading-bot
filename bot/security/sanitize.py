@@ -10,9 +10,8 @@ from urllib.parse import urlparse
 
 from bot.security.exceptions import ValidationError
 
-# Tickers Alpaca: AAPL, BRK.B. Cripto: BTC/USD, ETH/USD.
+# Tickers Alpaca: AAPL, BRK.B
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
-_CRYPTO_SYMBOL_RE = re.compile(r"^[A-Z]{2,10}/USD$")
 _UNSAFE_SYMBOL = re.compile(r"[^A-Z0-9.]|\.\.|^\.|\.$")
 _CRLF = re.compile(r"[\r\n\x00\x1b]")
 _FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -27,7 +26,8 @@ ALLOWED_TIMEFRAMES = frozenset(
     {"1Min", "3Min", "5Min", "6Min", "9Min", "15Min", "30Min", "1Hour", "1Day"}
 )
 ALLOWED_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
-MAX_SYMBOLS = 8
+MAX_SYMBOLS_DEFAULT = 8
+MAX_SYMBOLS_HARD_CAP = 55
 _TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,16}:[A-Za-z0-9_-]{20,120}$")
 _TELEGRAM_CHAT_RE = re.compile(r"^-?\d{5,20}$")
 
@@ -44,39 +44,25 @@ def sanitize_symbol(raw: str) -> str:
         raise ValidationError("Simbolo vacio")
     symbol = str(raw).strip().upper()
     if "/" in symbol:
-        if not _CRYPTO_SYMBOL_RE.match(symbol):
-            raise ValidationError("Simbolo cripto rechazado: use formato BTC/USD")
-        return symbol
+        raise ValidationError("Simbolo rechazado: solo acciones US (sin pares cripto)")
     if not symbol or _UNSAFE_SYMBOL.search(symbol) or not _SYMBOL_RE.match(symbol):
         raise ValidationError("Simbolo rechazado: formato invalido")
     return symbol
 
 
-def sanitize_crypto_symbols(
-    raw: str | list[str] | None,
-    default: list[str] | None = None,
-    *,
-    allow_empty: bool = False,
-) -> list[str]:
-    if raw is None or raw == "":
-        if allow_empty:
-            return []
-        values = list(default or [])
-    elif isinstance(raw, str):
-        values = [part.strip() for part in raw.split(",") if part.strip()]
-    else:
-        values = list(raw)
+def _max_symbols_limit() -> int:
+    import os
 
-    symbols = [sanitize_symbol(item) for item in values if "/" in str(item)]
-    if not symbols:
-        if allow_empty:
-            return []
-        raise ValidationError("CRYPTO_SYMBOLS no puede estar vacio")
-    if len(symbols) > MAX_SYMBOLS:
-        raise ValidationError(f"Demasiados simbolos cripto (max {MAX_SYMBOLS})")
-    if len(set(symbols)) != len(symbols):
-        raise ValidationError("CRYPTO_SYMBOLS contiene duplicados")
-    return symbols
+    raw = os.getenv("MAX_SYMBOLS", "").strip()
+    if not raw:
+        return MAX_SYMBOLS_DEFAULT
+    try:
+        n = int(raw)
+    except ValueError as exc:
+        raise ValidationError("MAX_SYMBOLS debe ser entero") from exc
+    if n < 1 or n > MAX_SYMBOLS_HARD_CAP:
+        raise ValidationError(f"MAX_SYMBOLS fuera de rango (1-{MAX_SYMBOLS_HARD_CAP})")
+    return n
 
 
 def sanitize_symbols(
@@ -84,6 +70,7 @@ def sanitize_symbols(
     default: list[str] | None = None,
     *,
     allow_empty: bool = False,
+    max_symbols: int | None = None,
 ) -> list[str]:
     if raw is None or raw == "":
         if allow_empty:
@@ -99,8 +86,9 @@ def sanitize_symbols(
         if allow_empty:
             return []
         raise ValidationError("SYMBOLS no puede estar vacio")
-    if len(symbols) > MAX_SYMBOLS:
-        raise ValidationError(f"Demasiados simbolos (max {MAX_SYMBOLS})")
+    cap = max_symbols if max_symbols is not None else _max_symbols_limit()
+    if len(symbols) > cap:
+        raise ValidationError(f"Demasiados simbolos (max {cap})")
     if len(set(symbols)) != len(symbols):
         raise ValidationError("SYMBOLS contiene duplicados")
     return symbols

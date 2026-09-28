@@ -169,9 +169,7 @@ class TradingEngine:
         self._atr_cache: dict[str, float] = {}
         self._daily_halt_day = ""
         self.dynamic_tp = DynamicTakeProfitLayer(settings)
-        from bot.alpaca.crypto_maker import CryptoMakerConfig
-
-        self.executor._crypto_maker_config = CryptoMakerConfig.from_settings(settings)
+        self.executor._crypto_maker_config = None
 
     def _submit_order(
         self,
@@ -192,26 +190,6 @@ class TradingEngine:
         attempt: int = 1,
         urgent_fallback: bool = False,
     ):
-        if is_crypto_symbol(symbol) and self.settings.crypto_maker_first_enabled:
-            return self.executor.submit_crypto_maker_first_order(
-                symbol,
-                qty,
-                side,
-                price=price,
-                entry_price=entry_price,
-                reason=reason,
-                stop_price=stop_price,
-                take_profit_price=take_profit_price,
-                stop_pct=stop_pct,
-                take_profit_pct=take_profit_pct,
-                bid=bid,
-                ask=ask,
-                spread_pct=spread_pct,
-                limit_spread_pct=self.settings.order_limit_spread_pct,
-                attempt=attempt,
-                maker_config=self.executor._crypto_maker_config,
-                urgent_fallback=urgent_fallback,
-            )
         return self.executor.submit_smart_order(
             symbol,
             qty,
@@ -231,24 +209,16 @@ class TradingEngine:
             force_market=urgent_fallback,
         )
 
-    def _crypto_asymmetric_exits(self, symbol: str) -> bool:
-        from bot.market.crypto_runtime import crypto_uses_asymmetric_exits
-
-        return crypto_uses_asymmetric_exits(self.settings, symbol)
-
     def _stock_asymmetric_exits(self, symbol: str) -> bool:
-        return (
-            not is_crypto_symbol(symbol) and self.settings.stock_asymmetric_exits_enabled
-        )
+        _ = symbol
+        return self.settings.stock_asymmetric_exits_enabled
 
     def _no_fixed_take_profit(self, symbol: str) -> bool:
-        return self._crypto_asymmetric_exits(symbol) or self._stock_asymmetric_exits(symbol)
+        return self._stock_asymmetric_exits(symbol)
 
     def _buy_entry_reason(self, symbol: str, entry_strategy: str | None = None) -> str:
         if entry_strategy:
             return entry_strategy
-        if self._crypto_asymmetric_exits(symbol):
-            return "crypto_asymmetric_1h"
         return "signal_entry"
 
     def _sell_signal_reason(self, symbol: str) -> str:

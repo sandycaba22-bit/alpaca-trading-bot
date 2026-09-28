@@ -22,7 +22,7 @@ Requiere **`SYNC_ENTRY_ENABLED=false`** en `.env.stocks` (sync_entry es otro pip
 En `.env.stocks`:
 
 ```env
-SYMBOLS=AAPL,MSFT,SLV,TSLA
+SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY,SLV,TSLA
 ```
 
 1. `git pull` en VPS  
@@ -36,7 +36,7 @@ SYMBOLS=AAPL,MSFT,SLV,TSLA
 Tras 1–2 sesiones OK en fase 1:
 
 ```env
-SYMBOLS=AAPL,MSFT,SLV,TSLA,NVDA,GOOGL,META
+SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY,SLV,TSLA,NVDA,GOOGL,META
 ```
 
 Restart solo procesos stocks (mismo comando PM2).

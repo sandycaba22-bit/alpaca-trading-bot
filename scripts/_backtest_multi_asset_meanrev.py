@@ -27,23 +27,14 @@ from bot.alpaca.client import AlpacaClient
 from bot.alpaca.market_data import MarketDataService
 from bot.config import PROJECT_ROOT, load_settings
 
-from _crypto_asymmetric_backtest_lib import load_1h, summarize_trades
-from _crypto_regime_entry_backtest_lib import walkforward_windows
-from _multi_asset_meanrev_lib import (
-    default_crypto_configs,
-    default_stock_configs,
-    metrics_crypto_period,
-    metrics_stock_is_oos,
-    run_crypto_meanrev_period,
-)
-from _research_universe import LIQUID_CRYPTO_SYMBOLS, LIQUID_STOCK_SYMBOLS
+from _multi_asset_meanrev_lib import default_stock_configs, metrics_stock_is_oos
+from bot.universe import ELITE_STOCK_SYMBOLS
 from _stocks_asymmetric_backtest_lib import CONFIRM_TF, ENTRY_TF, OOS_START, load_bars, pf_str
 
 OUT_CSV = PROJECT_ROOT / "logs" / "multi_asset_meanrev_backtest.csv"
 OUT_TXT = PROJECT_ROOT / "logs" / "multi_asset_meanrev_backtest_summary.txt"
 
-CRYPTO_DEFAULT = LIQUID_CRYPTO_SYMBOLS
-STOCKS_DEFAULT = LIQUID_STOCK_SYMBOLS
+STOCKS_DEFAULT = ELITE_STOCK_SYMBOLS
 
 
 def _row(
@@ -68,7 +59,6 @@ def _row(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mean-rev multi-activo (research)")
-    parser.add_argument("--crypto", nargs="*", default=list(CRYPTO_DEFAULT))
     parser.add_argument("--stocks", nargs="*", default=list(STOCKS_DEFAULT))
     parser.add_argument("--end", default=None)
     args = parser.parse_args()
@@ -76,47 +66,12 @@ def main() -> int:
     end = pd.Timestamp(args.end, tz="UTC") if args.end else pd.Timestamp(datetime.now(timezone.utc))
     settings = load_settings()
     market = MarketDataService(AlpacaClient(settings))
-    windows = walkforward_windows(end)
-
     print("=" * 96, flush=True)
     print("MULTI-ACTIVO MEAN-REV (BB+RSI) | vol>=MA | horas muertas | salidas asim", flush=True)
     print("Research only — no cablear a live/paper existente", flush=True)
     print("=" * 96, flush=True)
 
     rows: list[dict] = []
-
-    for cfg in default_crypto_configs(args.crypto):
-        print(f"\n>> CRIPTO {cfg.symbol} tf={cfg.entry_tf}", flush=True)
-        bars = load_1h(market, cfg.symbol, cfg.is_start.to_pydatetime(), end.to_pydatetime())
-        if bars.empty or len(bars) < 500:
-            print("  SKIP datos", flush=True)
-            continue
-        is_end = OOS_START - pd.Timedelta(hours=1)
-        m_is = metrics_crypto_period(settings, bars, cfg, start=cfg.is_start, end=is_end)
-        m_oos_single = metrics_crypto_period(settings, bars, cfg, start=OOS_START, end=end)
-        print(
-            f"  IS split335031 tr={int(m_is['trades'])} PF={pf_str(float(m_is['profit_factor']))} "
-            f"net%={m_is['total_return_net_pct']:+.2f} signals={int(m_is.get('entries_signal',0))}",
-            flush=True,
-        )
-        print(
-            f"  OOS split335031 tr={int(m_oos_single['trades'])} PF={pf_str(float(m_oos_single['profit_factor']))} "
-            f"net%={m_oos_single['total_return_net_pct']:+.2f}",
-            flush=True,
-        )
-        rows.append(_row("crypto", cfg.symbol, "IS", None, m_is))
-        rows.append(_row("crypto", cfg.symbol, "OOS", None, m_oos_single))
-        for wid, _a, _b, oos_start, oos_end in windows:
-            trs = run_crypto_meanrev_period(
-                settings, bars, cfg, period_start=oos_start, period_end=oos_end
-            )
-            m_w = summarize_trades(trs, float(settings.backtest_cash))
-            print(
-                f"  WF w{wid} OOS tr={int(m_w.get('trades',0))} PF={pf_str(float(m_w.get('profit_factor',0)))} "
-                f"net%={m_w.get('total_return_net_pct',0):+.2f}",
-                flush=True,
-            )
-            rows.append(_row("crypto", cfg.symbol, f"WF_OOS_{wid}", wid, m_w))
 
     for cfg in default_stock_configs(args.stocks):
         print(f"\n>> ACCIONES {cfg.symbol} tf={cfg.entry_tf}", flush=True)
@@ -158,23 +113,21 @@ def main() -> int:
         w.writeheader()
         w.writerows(rows)
 
-    symbols_order = list(args.crypto) + [s.upper() for s in args.stocks]
+    symbols_order = [s.upper() for s in args.stocks]
     lines = [
         "=== Multi-activo mean-rev backtest (research) ===",
         f"Generated UTC: {datetime.now(timezone.utc).isoformat()}",
         "Acciones: 5Min + 15Min | IS 2020-01-01->2025-01-01 | OOS 2025-01-01->hoy",
-        "Cripto: 1H + 4H | IS 2021-01-01->2025-01-01 | OOS 2025-01-01->hoy",
         "",
         f"{'Symbol':<10} {'Scope':<5} {'tr':>5} {'win%':>6} {'PF':>6} {'net%':>8}",
         "-" * 48,
     ]
     for sym in symbols_order:
-        asset = "crypto" if "/" in sym else "stock"
         for scope in ("IS", "OOS"):
             match = [
                 r
                 for r in rows
-                if r["symbol"] == sym and r["scope"] == scope and r["asset_class"] == asset
+                if r["symbol"] == sym and r["scope"] == scope and r["asset_class"] == "stock"
             ]
             if not match:
                 continue
@@ -186,8 +139,7 @@ def main() -> int:
     lines.extend(["", "=== Candidatos OOS (PF>1 y net%>0, scope OOS split 335031) ==="])
     picks: list[str] = []
     for sym in symbols_order:
-        asset = "crypto" if "/" in sym else "stock"
-        oos = next((r for r in rows if r["symbol"] == sym and r["scope"] == "OOS" and r["asset_class"] == asset), None)
+        oos = next((r for r in rows if r["symbol"] == sym and r["scope"] == "OOS" and r["asset_class"] == "stock"), None)
         if not oos or int(oos["trades"]) == 0:
             continue
         if float(oos["pf"]) > 1.0 and float(oos["net_pct"]) > 0:

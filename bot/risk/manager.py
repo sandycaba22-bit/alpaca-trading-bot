@@ -73,40 +73,6 @@ class RiskManager:
                     breakeven_buffer_atr_mult=settings.breakeven_buffer_atr_mult,
                     min_tp_pct=settings.min_tp_pct,
                 )
-            if is_crypto_symbol(symbol):
-                from bot.market.crypto_runtime import crypto_uses_asymmetric_exits
-
-                if crypto_uses_asymmetric_exits(settings, symbol):
-                    return StopTakeProfitPolicy(
-                        stop_loss_pct=policy.stop_loss_pct,
-                        take_profit_pct=0.99,
-                        atr_stop_mult=policy.atr_stop_mult,
-                        atr_sl_mult=settings.crypto_asymmetric_sl_atr_mult,
-                        atr_tp_mult=99.0,
-                        atr_trailing_mult=settings.crypto_asymmetric_trail_atr_mult,
-                        breakeven_activate_pct=0.02,
-                        breakeven_activate_atr_mult=settings.crypto_asymmetric_trail_activate_atr_mult,
-                        breakeven_buffer=settings.breakeven_buffer,
-                        breakeven_buffer_pct=settings.crypto_breakeven_buffer_pct,
-                        breakeven_buffer_atr_mult=settings.crypto_breakeven_buffer_atr_mult,
-                        min_tp_pct=0.0,
-                    )
-                return StopTakeProfitPolicy(
-                    stop_loss_pct=policy.stop_loss_pct,
-                    take_profit_pct=policy.take_profit_pct,
-                    atr_stop_mult=policy.atr_stop_mult,
-                    atr_sl_mult=(
-                        params.atr_stop_mult if params is not None else settings.crypto_atr_sl_mult
-                    ),
-                    atr_tp_mult=settings.crypto_atr_tp_mult,
-                    atr_trailing_mult=settings.crypto_atr_trailing_mult,
-                    breakeven_activate_pct=settings.crypto_breakeven_activate_pct,
-                    breakeven_activate_atr_mult=settings.crypto_breakeven_activate_atr_mult,
-                    breakeven_buffer=settings.breakeven_buffer,
-                    breakeven_buffer_pct=settings.crypto_breakeven_buffer_pct,
-                    breakeven_buffer_atr_mult=settings.crypto_breakeven_buffer_atr_mult,
-                    min_tp_pct=settings.crypto_min_tp_pct,
-                )
             if settings.stock_asymmetric_exits_enabled:
                 return StopTakeProfitPolicy(
                     stop_loss_pct=policy.stop_loss_pct,
