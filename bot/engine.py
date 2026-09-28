@@ -1577,11 +1577,21 @@ class TradingEngine:
                 return
         self._close_and_report(symbol, qty, entry, last_price, reason.value)
 
+    def _bot_manages_symbol(self, symbol: str) -> bool:
+        """Universo del bot + libro local; ignora huérfanas del broker (p. ej. cripto vieja)."""
+        key = normalize_symbol(symbol)
+        if self.executor.position_book.get(symbol) is not None:
+            return True
+        allowed = {normalize_symbol(s) for s in self.settings.stock_symbols}
+        return key in allowed
+
     def _mark_all_positions(self) -> None:
         """Monitorea SL/TP de todas las posiciones abiertas (libro local o broker)."""
         clock = self.client.get_market_clock()
         positions = positions_by_symbol(self.executor.list_positions())
         for symbol in list(positions):
+            if not self._bot_manages_symbol(symbol):
+                continue
             if self.control.is_paused():
                 return
             try:
@@ -1592,6 +1602,8 @@ class TradingEngine:
                 log_caught(logger, "mark_to_market_failed", exc, symbol=symbol)
 
     def _mark_to_market(self, symbol: str, positions: dict, clock: MarketClockView) -> None:
+        if not self._bot_manages_symbol(symbol):
+            return
         position = positions.get(normalize_symbol(symbol)) or positions.get(symbol)
         if position is None:
             return

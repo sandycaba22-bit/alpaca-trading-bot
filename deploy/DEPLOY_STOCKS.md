@@ -25,6 +25,21 @@ Edita keys en `.env.stocks` (live) y `.env.stocks_top50` (paper) antes de operar
 cd ~/alpaca-trading-bot && bash deploy/update-vps.sh
 ```
 
+## Antes de la apertura US
+
+```bash
+cd ~/alpaca-trading-bot
+git pull origin main
+bash deploy/pre-open-stocks.sh
+```
+
+Cerrar posición cripto huérfana en paper (misma cuenta que Top 50):
+
+```bash
+ENV_FILE=.env.stocks_top50 python scripts/close_broker_symbol.py --list
+ENV_FILE=.env.stocks_top50 python scripts/close_broker_symbol.py --crypto-orphans
+```
+
 ## PM2 manual
 
 ```bash
