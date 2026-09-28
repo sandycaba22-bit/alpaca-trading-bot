@@ -145,7 +145,7 @@ class AlpacaClient:
 
     def validate_startup(self) -> tuple[AccountSnapshot | None, MarketClockView]:
         """Validación no bloqueante: credenciales útiles pero sin exigir mercado de acciones."""
-        logger.info("Validando conexion con Alpaca (modo hibrido)...")
+        logger.info("Validando conexion con Alpaca...")
         snapshot: AccountSnapshot | None = None
         clock = crypto_fallback_clock()
 
@@ -194,7 +194,7 @@ class AlpacaClient:
             )
             if not clock.is_open and clock.stock_feed_ok:
                 logger.info(
-                    "Mercado de acciones cerrado — modo cripto activo si corresponde"
+                    "Mercado de acciones cerrado — bot acciones en reposo hasta apertura"
                 )
         else:
             audit("auth", "warn", reason="account_unavailable", market_open=clock.is_open)

@@ -96,7 +96,7 @@ def local_qty_map(book: OpenPositionBook, settings: Settings | None = None) -> d
 def _profile_symbol_keys(settings: Settings | None) -> set[str] | None:
     if settings is None or settings.bot_profile == "hybrid":
         return None
-    if settings.bot_profile == "stocks":
+    if settings.bot_profile in {"stocks", "stocks_top50"}:
         symbols = settings.stock_symbols
     elif settings.bot_profile == "crypto":
         symbols = settings.crypto_symbols
@@ -302,7 +302,7 @@ def assert_positions_match(
             notifier.notify_position_mismatch(message)
         raise ValidationError(message) from None
 
-    if settings is not None and settings.bot_profile in {"stocks", "crypto"}:
+    if settings is not None and settings.bot_profile in {"stocks", "stocks_top50", "crypto"}:
         adopted = adopt_broker_positions_for_profile(client, book, settings)
         if adopted:
             logger.info("Reconcile adoptó %s posiciones del broker al libro local", adopted)
