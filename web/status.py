@@ -143,7 +143,7 @@ def main() -> int:
         "sync_entry_enabled": bool(settings.sync_entry_enabled),
         "market_stream_enabled": bool(settings.market_stream_enabled),
         "telegram_prefix": settings.telegram_prefix,
-        "stock_entry_vol_mult": settings.stock_entry_vol_mult,
+        "stock_entry_vol_mult": settings.stock_entry_signal_volume_mult,
         "timeframes": {
             "bar_timeframe": settings.bar_timeframe,
             "stock_entry_timeframe": settings.stock_entry_timeframe,
