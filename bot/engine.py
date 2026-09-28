@@ -535,6 +535,11 @@ class TradingEngine:
         if self._stream is not None:
             return
         settings = self.settings
+        if not settings.market_stream_enabled:
+            logger.info(
+                "stream | deshabilitado (MARKET_STREAM_ENABLED=false) — precios vía REST"
+            )
+            return
         self._stream = LiveMarketStream(
             settings.api_key_id,
             settings.api_secret_key,
@@ -553,7 +558,7 @@ class TradingEngine:
             reconnect_max=settings.stream_reconnect_max_seconds,
         )
         self._stream.start()
-        if settings.bot_profile == "stocks":
+        if settings.bot_profile in {"stocks", "stocks_top50"}:
             try:
                 clock = self.client.get_market_clock()
                 self._stream.set_stock_expected(bool(clock.is_open))

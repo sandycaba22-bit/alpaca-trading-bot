@@ -218,6 +218,7 @@ class Settings:
     risk_percent_per_trade: float = 0.01
     daily_loss_limit_pct: float = 0.03
     use_fixed_risk_sizing: bool = True
+    market_stream_enabled: bool = True
     stream_stale_seconds: float = 120.0
     stream_data_timeout_seconds: float = 0.0
     stream_ws_ping_interval: float = 10.0
@@ -1139,6 +1140,10 @@ def load_settings(env_path: Path | None = None) -> Settings:
             name="DAILY_LOSS_LIMIT_PERCENT",
         ),
         use_fixed_risk_sizing=_as_bool(os.getenv("USE_FIXED_RISK_SIZING"), default=True),
+        market_stream_enabled=_as_bool(
+            os.getenv("MARKET_STREAM_ENABLED"),
+            default=bot_profile != "stocks_top50",
+        ),
         stream_stale_seconds=bounded_float(
             os.getenv("STREAM_STALE_SECONDS"),
             120.0,
