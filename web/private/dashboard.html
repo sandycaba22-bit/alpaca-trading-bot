@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard | Bot Alpaca Paper</title>
+    <title>Dashboard | Bot acciones vol_2x</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -11,8 +11,9 @@
     <main class="shell">
         <div class="top">
             <div>
-                <p class="eyebrow" id="panel-eyebrow">Paper trading · no dinero real</p>
-                <h1 id="panel-title">Panel de administracion</h1>
+                <p class="eyebrow" id="panel-eyebrow">Cargando perfil…</p>
+                <h1 id="panel-title">Panel de administración</h1>
+                <p class="muted panel-tagline" id="panel-tagline"></p>
             </div>
             <div class="actions">
                 <a class="btn btn-ghost" href="/api/logout">Cerrar sesion</a>
@@ -87,7 +88,6 @@
     </main>
     <script>
         const STOCK_CHART_TFS = ['5Min', '9Min', '15Min', '1Hour', '1Day'];
-        const CRYPTO_CHART_TFS = ['15Min', '30Min', '1Hour', '1Day'];
         const TF_LABELS = {
             '5Min': '5 min',
             '9Min': '9 min',
@@ -128,18 +128,38 @@
             return tf.stock_entry_timeframe || '5Min';
         }
 
+        function executionLabel(data) {
+            if (data.dry_run) return 'Dry-run';
+            return data.paper ? 'Paper Alpaca' : 'Live Alpaca';
+        }
+
+        function streamLabel(data) {
+            if (data.market_stream_enabled === false) {
+                return 'Precios REST (sin websocket IEX)';
+            }
+            return 'Stream IEX activo';
+        }
+
         function applyPanelChrome(data) {
             const profile = panelProfileFromData(data);
             chartState.panelProfile = profile;
             const title = document.getElementById('panel-title');
             const eyebrow = document.getElementById('panel-eyebrow');
+            const tagline = document.getElementById('panel-tagline');
+            const exec = executionLabel(data);
+            const prefix = data.telegram_prefix ? ('Telegram ' + data.telegram_prefix + ' · ') : '';
             if (profile === 'stocks_top50') {
-                title.textContent = 'Panel Top 50 (vol_2x)';
-                eyebrow.textContent = 'Bot Top 50 acciones · paper · puerto 3001';
+                title.textContent = 'Top 50 · vol_2x + SMA 50';
+                eyebrow.textContent = prefix + exec + ' · puerto 3001';
+                tagline.textContent = streamLabel(data)
+                    + ' · hasta ' + (data.stock_symbols || []).length + ' símbolos en universo.';
             } else {
-                title.textContent = 'Panel Élite (vol_2x)';
-                eyebrow.textContent = 'Acciones live · puerto 3000';
+                title.textContent = 'Élite · vol_2x + SMA 50';
+                eyebrow.textContent = prefix + exec + ' · puerto 3000';
+                tagline.textContent = streamLabel(data)
+                    + ' · universo: ' + ((data.stock_symbols || []).join(', ') || '—');
             }
+            document.title = title.textContent + ' | Panel';
         }
 
         function applyTfSelectForProfile(data) {
@@ -180,14 +200,17 @@
             const regime = tf.stock_regime_timeframe || '15Min';
             const confirm = tf.stock_confirm_timeframe || tf.confirm_higher_tf || '15Min';
             const tz = 'America/New_York (NYSE)';
-            const sync = data.sync_entry_enabled !== false ? 'sync_entry ON' : 'sync_entry OFF';
-            el.innerHTML = '<strong>Señales del bot:</strong> entrada <strong>' + entry + '</strong>'
+            const volMult = data.stock_entry_vol_mult != null ? Number(data.stock_entry_vol_mult) : 2;
+            const pipeline = data.sync_entry_enabled
+                ? 'sync_entry ON (legacy)'
+                : ('vol_2x · vela entrada ≥ ' + volMult + '× media vol-20');
+            el.innerHTML = '<strong>Pipeline acciones:</strong> ' + pipeline
+                + ' · TF entrada <strong>' + entry + '</strong>'
                 + ' · régimen <strong>' + regime + '</strong>'
                 + ' · confirmación <strong>' + confirm + '</strong>'
-                + ' · ' + sync
-                + ' · gráfico en <strong>' + tz + '</strong>'
-                + ' · velas <strong>cerradas</strong> (igual que evalúa el bot).'
-                + ' Elige ★ para ver exactamente la capa de entrada.';
+                + ' · gráfico <strong>' + tz + '</strong>'
+                + ' · velas <strong>cerradas</strong> (como el bot).'
+                + ' Intervalo ★ = capa de entrada.';
         }
 
         function syncSymbolSelect(data) {
@@ -228,8 +251,8 @@
             return needChart;
         }
 
-        function formatChartTime(unixSec, profile) {
-            const tz = profile === 'crypto' ? 'UTC' : 'America/New_York';
+        function formatChartTime(unixSec) {
+            const tz = 'America/New_York';
             const d = new Date(unixSec * 1000);
             return d.toLocaleString('es-DO', {
                 timeZone: tz,
@@ -415,9 +438,8 @@
             return side === 'buy' ? 'COMPRA' : side === 'sell' ? 'VENTA' : side;
         }
         function chartLocalization() {
-            const profile = chartState.panelProfile || 'stocks';
             return {
-                timeFormatter: (time) => formatChartTime(time, profile)
+                timeFormatter: (time) => formatChartTime(time)
             };
         }
 
@@ -492,12 +514,13 @@
             /* sustituido por syncSymbolSelect en renderDashboard */
             void symbols;
         }
-        function renderSchedulerLayers(scheduler, tradingMode, tradingModeLabel, activeSymbols) {
+        function renderSchedulerLayers(scheduler, tradingMode, tradingModeLabel, activeSymbols, panelProfile) {
             const el = document.getElementById('scheduler-layers');
+            const modeClass = panelProfile === 'stocks_top50' ? 'stocks_top50' : (tradingMode || 'stocks');
             const modeLine = tradingModeLabel
-                ? '<div class="trading-mode trading-mode--' + (tradingMode || 'stocks') + '">'
+                ? '<div class="trading-mode trading-mode--' + modeClass + '">'
                     + '<strong>' + tradingModeLabel + '</strong>'
-                    + ' · activos: ' + (activeSymbols && activeSymbols.length ? activeSymbols.join(', ') : '—')
+                    + ' · escaneo: ' + (activeSymbols && activeSymbols.length ? activeSymbols.join(', ') : '—')
                     + '</div>'
                 : '';
             if (!scheduler || !scheduler.layers) {
@@ -510,7 +533,7 @@
                 const next = row.next_in_seconds != null ? row.next_in_seconds + 's' : '—';
                 let label = 'Macro';
                 if (name === '3m') label = 'Rapido';
-                else if (name === 'entry') label = 'Sync entrada';
+                else if (name === 'entry') label = 'Entrada / vol_2x';
                 else if (name === '1h') label = 'Legacy 1H';
                 return '<span class="layer-chip"><strong>' + name + '</strong> ' + label
                     + ' · cada ' + mins + 'm · prox ' + next + '</span>';
@@ -543,15 +566,17 @@
                 ? (intervalSec / 60).toFixed(intervalSec % 60 === 0 ? 0 : 1) + ' min'
                 : intervalSec + ' s';
 
+            const profile = panelProfileFromData(data);
             BotUI.setMeta([
-                ['Modo', data.trading_mode_label || (data.market_open ? 'Modo Acciones' : 'Modo Cripto Nocturno/Fin de Semana')],
-                ['Activos', (data.active_symbols || []).join(', ') || '—'],
+                ['Perfil', profile === 'stocks_top50' ? 'Top 50' : 'Élite'],
+                ['Modo', data.trading_mode_label || (data.market_open ? 'Sesión US' : 'Reposo (mercado cerrado)')],
+                ['Activos hoy', (data.active_symbols || []).join(', ') || '—'],
                 ['Mercado US', market],
-                ['Refresco', '15 min auto'],
+                ['Datos', data.market_stream_enabled === false ? 'REST' : 'WebSocket IEX'],
                 ['Tick', intervalTxt],
-                ['Bot', data.bot && data.bot.active ? 'ACTIVO' : 'APAGADO'],
-                ['Telegram', data.telegram_verified ? 'Activo' : (data.telegram_enabled ? 'Error token' : 'Off')],
-                ['Ejecucion', data.dry_run ? 'Dry-run' : (data.paper ? 'Paper live' : 'Live')],
+                ['Bot PM2', data.bot && data.bot.active ? 'ACTIVO' : 'APAGADO'],
+                ['Telegram', data.telegram_verified ? 'OK' : (data.telegram_enabled ? 'Revisar token' : 'Off')],
+                ['Cuenta', executionLabel(data)],
                 ['PID', data.bot && data.bot.pid ? String(data.bot.pid) : '—']
             ]);
 
@@ -559,7 +584,8 @@
                 data.scheduler,
                 data.trading_mode,
                 data.trading_mode_label,
-                data.active_symbols
+                data.active_symbols,
+                profile
             );
 
             const realized = Number(data.realized_pnl || 0);

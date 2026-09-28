@@ -229,10 +229,14 @@ button, .btn {
     border: 1px solid rgba(34, 197, 94, 0.35);
     color: #86efac;
 }
-.trading-mode--crypto {
-    background: rgba(251, 191, 36, 0.12);
-    border: 1px solid rgba(251, 191, 36, 0.35);
-    color: #fcd34d;
+.trading-mode--stocks_top50 {
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    color: #93c5fd;
+}
+.panel-tagline {
+    margin: 0 0 8px;
+    font-size: 0.92rem;
 }
 .refresh-msg {
     margin: -8px 0 16px;

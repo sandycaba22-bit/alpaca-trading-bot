@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login | Bot Alpaca</title>
+    <title>Login | Bot acciones vol_2x</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
     <main class="card">
-        <p class="eyebrow">Alpaca Paper</p>
-        <h1>Panel del bot</h1>
-        <p class="muted">Acceso restringido al administrador.</p>
+        <p class="eyebrow" id="login-eyebrow">Bot acciones</p>
+        <h1 id="login-title">Panel del bot</h1>
+        <p class="muted" id="login-sub">Acceso restringido al administrador.</p>
         <p id="error" class="error hidden">Credenciales incorrectas o demasiados intentos.</p>
         <form method="post" action="/api/login" autocomplete="off">
             <label for="username">Usuario</label>
@@ -25,6 +25,17 @@
         if (params.get('error')) {
             document.getElementById('error').classList.remove('hidden');
         }
+        const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+        const top50 = port === '3001';
+        document.getElementById('login-eyebrow').textContent = top50
+            ? 'Top 50 · vol_2x · paper'
+            : 'Élite · vol_2x · acciones';
+        document.getElementById('login-title').textContent = top50
+            ? 'Panel Top 50 (:3001)'
+            : 'Panel Élite (:3000)';
+        document.getElementById('login-sub').textContent = top50
+            ? 'Universo 50 large caps · mismo login que el panel élite.'
+            : 'SLV, TSLA, GOOGL, META, NVDA, SPY · stream IEX cuando está habilitado.';
     </script>
 </body>
 </html>
