@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import pickle
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -25,6 +26,8 @@ CACHE = PROJECT_ROOT / "data" / "bars_cache"
 OOS_START = pd.Timestamp("2025-01-01", tz="UTC")
 ENTRY_TF = "5Min"
 CONFIRM_TF = "15Min"
+# Límite al simular salida solo para espaciar entradas en precompute (simulate_trades hace el P&L real).
+PRECOMPUTE_MAX_HOLD_BARS = 2500
 SYMBOLS = ("AAPL", "MSFT")
 
 
@@ -221,8 +224,9 @@ def precompute_entries(
     hold = exit_policy or policy_asymmetric(settings)
     vol_mult = variant.volume_mult if variant else None
     vol_period = int(variant.volume_period if variant else settings.volume_confirmation_period)
+    bar_step = 10 if os.getenv("RESEARCH_FAST", "").strip() in {"1", "true", "yes"} else 1
 
-    for i in range(start_i, n):
+    for i in range(start_i, n, bar_step):
         if i <= in_pos_until:
             continue
         hist = bars.iloc[i - lookback : i]
@@ -267,26 +271,8 @@ def precompute_entries(
         if vol_mult is not None and not _entry_bar_volume_ok(bars, i, vol_period, vol_mult):
             continue
         entries.append(i)
-        entry_px = float(bars["open"].iloc[i])
-        atr_e = last_atr(hist, settings.atr_period)
-        lv = hold.levels(entry_px, 1.0, entry_px, atr_e)
-        sl, tp, peak = lv.stop_price, lv.take_profit_price, entry_px
-        exit_j = n - 1
-        for j in range(i + 1, n):
-            h = float(bars["high"].iloc[j])
-            l = float(bars["low"].iloc[j])
-            c = float(bars["close"].iloc[j])
-            peak = max(peak, h, c)
-            new_sl, _ = hold.trailing_candidate(entry_px, 1.0, peak, sl, atr_e)
-            if new_sl is not None:
-                sl = new_sl
-            if sl > 0 and l <= sl:
-                exit_j = j
-                break
-            if tp > 0 and h >= tp:
-                exit_j = j
-                break
-        in_pos_until = exit_j
+        # Espaciado mínimo entre señales; P&L y solapamiento real en simulate_trades().
+        in_pos_until = i + 12
     if not quiet:
         tag = variant.name if variant else "default"
         print(f"{symbol} [{tag}] entries={len(entries)} (5Min multi-regimen)")
@@ -437,8 +423,11 @@ def simulate_trades(
     lookback = max(int(settings.lookback_bars), 80)
     sl_mult = _sl_mult_for_policy(settings, policy)
     trades: list[SimTrade] = []
+    last_exit_idx = -1
 
     for ei in entry_idxs:
+        if ei <= last_exit_idx:
+            continue
         ts = bars.index[ei]
         if period_start is not None and ts < period_start:
             continue
@@ -459,6 +448,7 @@ def simulate_trades(
             tp = 0.0
         peak = entry
         exit_px = None
+        exit_j = len(bars) - 1
         for j in range(ei + 1, len(bars)):
             h = float(bars["high"].iloc[j])
             l = float(bars["low"].iloc[j])
@@ -469,12 +459,15 @@ def simulate_trades(
                 sl = new_sl
             if sl > 0 and l <= sl:
                 exit_px = sl
+                exit_j = j
                 break
             if tp > 0 and h >= tp:
                 exit_px = tp
+                exit_j = j
                 break
         if exit_px is None:
             exit_px = float(bars["close"].iloc[-1])
+        last_exit_idx = exit_j
         notional_in = entry * qty
         notional_out = exit_px * qty
         pnl_gross = (exit_px - entry) * qty
