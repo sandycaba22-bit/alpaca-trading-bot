@@ -1,7 +1,7 @@
 # Despliegue live acciones — vol_2x + SMA 50 (sweep 335031)
 
 Solo perfil **stocks** (`BOT_PROFILE=stocks`, PM2 `trading-bot-stocks`, panel **:3000**).  
-**No modifica** `.env.crypto` ni el guardrail `BOT_PROFILE=crypto` → paper.
+Bot secundario Top 50: `.env.stocks_top50` + PM2 `:3001` (paper). Ver `deploy/DEPLOY_STOCKS.md`.
 
 ## Parámetros (igual que backtest)
 
@@ -22,7 +22,7 @@ Requiere **`SYNC_ENTRY_ENABLED=false`** en `.env.stocks` (sync_entry es otro pip
 En `.env.stocks`:
 
 ```env
-SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY,SLV,TSLA
+SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY
 ```
 
 1. `git pull` en VPS  
@@ -31,15 +31,14 @@ SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY,SLV,TSLA
 4. Verificar log arranque: líneas `Acciones entrada vol_2x` y `Acciones asimétrico | LIVE ON`.  
 5. Compras: Telegram **Motivo: vol_2x**, SL/trail ATR sin TP fijo %.
 
-### Fase 2 — 7 símbolos
-
-Tras 1–2 sesiones OK en fase 1:
+### Universo élite (actual)
 
 ```env
-SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY,SLV,TSLA,NVDA,GOOGL,META
+SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY
+MAX_SYMBOLS=8
 ```
 
-Restart solo procesos stocks (mismo comando PM2).
+Restart: `pm2 restart trading-bot-stocks trading-web-stocks --update-env`
 
 ## Sizing (~$300)
 

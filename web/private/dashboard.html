@@ -118,14 +118,13 @@
         };
 
         function panelProfileFromData(data) {
-            return data.bot_profile === 'crypto' ? 'crypto' : 'stocks';
+            const p = (data.bot_profile || 'stocks').toLowerCase();
+            if (p === 'stocks_top50') return 'stocks_top50';
+            return 'stocks';
         }
 
         function entryTimeframeForProfile(data) {
             const tf = data.timeframes || {};
-            if (panelProfileFromData(data) === 'crypto') {
-                return tf.crypto_bar_timeframe || '15Min';
-            }
             return tf.stock_entry_timeframe || '5Min';
         }
 
@@ -134,12 +133,12 @@
             chartState.panelProfile = profile;
             const title = document.getElementById('panel-title');
             const eyebrow = document.getElementById('panel-eyebrow');
-            if (profile === 'crypto') {
-                title.textContent = 'Panel Cripto (sync_entry)';
-                eyebrow.textContent = 'Bot cripto · paper · puerto 3001';
+            if (profile === 'stocks_top50') {
+                title.textContent = 'Panel Top 50 (vol_2x)';
+                eyebrow.textContent = 'Bot Top 50 acciones · paper · puerto 3001';
             } else {
-                title.textContent = 'Panel Acciones (sync_entry)';
-                eyebrow.textContent = 'Bot acciones · paper · puerto 3000';
+                title.textContent = 'Panel Élite (vol_2x)';
+                eyebrow.textContent = 'Acciones live · puerto 3000';
             }
         }
 
@@ -147,10 +146,8 @@
             const profile = panelProfileFromData(data);
             const tfInfo = data.timeframes || {};
             const entryTf = entryTimeframeForProfile(data);
-            const regimeTf = profile === 'crypto'
-                ? (tfInfo.crypto_regime_timeframe || '30Min')
-                : (tfInfo.stock_regime_timeframe || '9Min');
-            const allowed = profile === 'crypto' ? CRYPTO_CHART_TFS : STOCK_CHART_TFS;
+            const regimeTf = tfInfo.stock_regime_timeframe || '15Min';
+            const allowed = STOCK_CHART_TFS;
             const select = document.getElementById('tf-select');
             select.innerHTML = '';
             allowed.forEach((tf) => {
@@ -180,13 +177,9 @@
             const profile = panelProfileFromData(data);
             const tf = data.timeframes || {};
             const entry = entryTimeframeForProfile(data);
-            const regime = profile === 'crypto'
-                ? (tf.crypto_regime_timeframe || '30Min')
-                : (tf.stock_regime_timeframe || '9Min');
-            const confirm = profile === 'crypto'
-                ? (tf.crypto_confirm_timeframe || tf.crypto_regime_timeframe || '30Min')
-                : (tf.stock_confirm_timeframe || tf.confirm_higher_tf || '15Min');
-            const tz = profile === 'crypto' ? 'UTC' : 'America/New_York (NYSE)';
+            const regime = tf.stock_regime_timeframe || '15Min';
+            const confirm = tf.stock_confirm_timeframe || tf.confirm_higher_tf || '15Min';
+            const tz = 'America/New_York (NYSE)';
             const sync = data.sync_entry_enabled !== false ? 'sync_entry ON' : 'sync_entry OFF';
             el.innerHTML = '<strong>Señales del bot:</strong> entrada <strong>' + entry + '</strong>'
                 + ' · régimen <strong>' + regime + '</strong>'
@@ -202,9 +195,7 @@
             applyTfSelectForProfile(data);
             const select = document.getElementById('symbol-select');
             const profile = panelProfileFromData(data);
-            const pool = profile === 'crypto'
-                ? (data.crypto_symbols || [])
-                : (data.stock_symbols || data.symbols || []);
+            const pool = data.stock_symbols || data.symbols || [];
             const profileChanged = chartState.profileBound !== profile;
             const prev = select.value;
             const entryTf = entryTimeframeForProfile(data);

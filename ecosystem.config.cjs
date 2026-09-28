@@ -1,8 +1,8 @@
 /**
- * PM2 — procesos permanentes del bot Alpaca (panel + motor).
+ * PM2 legacy (un solo proceso). Preferir ecosystem.production.config.js (élite + Top 50).
  *
  * Uso (desde la raíz del repo):
- *   pm2 start ecosystem.config.cjs
+ *   pm2 start ecosystem.production.config.js
  *   pm2 save
  *   pm2 status
  *

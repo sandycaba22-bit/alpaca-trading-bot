@@ -4,7 +4,7 @@ NO producción. Cripto: IS/OOS walk-forward 5 ventanas + split 335031.
 Acciones: IS 2020-01-01 -> 2025-01-01 | OOS 2025-01-01 -> hoy.
 
   .venv\\Scripts\\python.exe -u scripts\\_backtest_multi_asset_meanrev.py
-  .venv\\Scripts\\python.exe -u scripts\\_backtest_multi_asset_meanrev.py --crypto ETH/USD --stocks AAPL MSFT
+  .venv\\Scripts\\python.exe -u scripts\\_backtest_multi_asset_meanrev.py --stocks SLV TSLA
 
 Salida: logs/multi_asset_meanrev_backtest.csv, logs/multi_asset_meanrev_backtest_summary.txt
 """

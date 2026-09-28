@@ -253,8 +253,6 @@ class Settings:
             raise ValidationError("TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID deben ir juntos")
         if self.sma_fast >= self.sma_slow:
             raise ValidationError("SMA_FAST debe ser menor que SMA_SLOW")
-        if self.crypto_sma_fast >= self.crypto_sma_slow:
-            raise ValidationError("CRYPTO_SMA_FAST debe ser menor que CRYPTO_SMA_SLOW")
         if self.bot_profile in {"stocks", "stocks_top50"} and not self.stock_symbols:
             raise ValidationError(f"BOT_PROFILE={self.bot_profile} requiere SYMBOLS")
 

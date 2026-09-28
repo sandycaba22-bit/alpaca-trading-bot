@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Actualiza código + reinicia solo PM2 acciones (NO toca cripto).
+# Actualiza código + reinicia PM2 bot élite (NO toca Top 50 paper).
 # Uso en VPS: cd ~/alpaca-trading-bot && bash deploy/update-stocks-vol2x-vps.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -39,7 +39,8 @@ set_kv RISK_PERCENT_PER_TRADE 0.01
 set_kv MAX_OPEN_POSITIONS 3
 set_kv POSITION_SIZE_PCT 0.14
 set_kv MAX_NOTIONAL_PER_ORDER 45
-set_kv SYMBOLS "AAPL,MSFT,SLV,TSLA"
+set_kv SYMBOLS "SLV,TSLA,GOOGL,META,NVDA,SPY"
+set_kv MAX_SYMBOLS 8
 
 echo "=== pm2 restart solo stocks ==="
 pm2 restart trading-bot-stocks trading-web-stocks --update-env
