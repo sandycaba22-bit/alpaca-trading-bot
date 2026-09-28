@@ -24,6 +24,8 @@ WS_PING_INTERVAL = 10.0
 WS_PING_TIMEOUT = 180.0
 QUIET_LOG_SECONDS = 60.0
 SHUTDOWN_WAIT_SECONDS = 5.0
+# Alpaca paper IEX websocket (~30 símbolos); el resto usa REST en fallback.
+MAX_STOCK_WS_SYMBOLS = 30
 
 
 class StreamHealth:
@@ -535,12 +537,27 @@ class LiveMarketStream:
             "max_queue": 1024,
         }
 
+    def _stock_ws_symbols(self) -> list[str]:
+        if len(self._stock_symbols) <= MAX_STOCK_WS_SYMBOLS:
+            return self._stock_symbols
+        logger.warning(
+            "stream | IEX WS limitado a %s/%s símbolos; el universo completo sigue en REST",
+            MAX_STOCK_WS_SYMBOLS,
+            len(self._stock_symbols),
+        )
+        return self._stock_symbols[:MAX_STOCK_WS_SYMBOLS]
+
     def _stock_loop(self) -> None:
         failures = 0
         while self._should_run:
             stream = None
             try:
-                logger.info("stream | conectando stock IEX | %s", ",".join(self._stock_symbols))
+                ws_syms = self._stock_ws_symbols()
+                logger.info(
+                    "stream | conectando stock IEX | ws=%s | universo=%s",
+                    ",".join(ws_syms),
+                    len(self._stock_symbols),
+                )
                 kwargs: dict[str, Any] = {
                     "feed": DataFeed.IEX,
                     "websocket_params": self._websocket_params(),
@@ -549,8 +566,8 @@ class LiveMarketStream:
                     kwargs["data_timeout"] = self._data_timeout
                 stream = StockDataStream(self._api_key, self._secret_key, **kwargs)
                 self._hook_lifecycle(stream, "stock")
-                stream.subscribe_trades(self._on_trade, *self._stock_symbols)
-                stream.subscribe_quotes(self._on_quote, *self._stock_symbols)
+                stream.subscribe_trades(self._on_trade, *ws_syms)
+                stream.subscribe_quotes(self._on_quote, *ws_syms)
                 self._streams.append(stream)
                 stream.run()
                 failures = 0
