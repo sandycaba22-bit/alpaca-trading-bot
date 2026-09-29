@@ -12,7 +12,7 @@ def normalize_symbol(symbol: str) -> str:
 
 
 def is_crypto_symbol(symbol: str) -> bool:
-    return False
+    return "/" in normalize_symbol(symbol)
 
 
 def is_stock_symbol(symbol: str) -> bool:

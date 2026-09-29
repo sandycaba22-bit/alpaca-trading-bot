@@ -12,6 +12,7 @@ from bot.security.exceptions import ValidationError
 
 # Tickers Alpaca: AAPL, BRK.B
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.]{0,9}$")
+_CRYPTO_PAIR_RE = re.compile(r"^[A-Z]{2,12}/[A-Z]{2,12}$")
 _UNSAFE_SYMBOL = re.compile(r"[^A-Z0-9.]|\.\.|^\.|\.$")
 _CRLF = re.compile(r"[\r\n\x00\x1b]")
 _FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -23,7 +24,7 @@ ALLOWED_API_HOSTS = frozenset(
     }
 )
 ALLOWED_TIMEFRAMES = frozenset(
-    {"1Min", "3Min", "5Min", "6Min", "9Min", "15Min", "30Min", "1Hour", "1Day"}
+    {"1Min", "3Min", "5Min", "6Min", "9Min", "15Min", "30Min", "1Hour", "4Hour", "1Day"}
 )
 ALLOWED_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 MAX_SYMBOLS_DEFAULT = 8
@@ -44,7 +45,9 @@ def sanitize_symbol(raw: str) -> str:
         raise ValidationError("Simbolo vacio")
     symbol = str(raw).strip().upper()
     if "/" in symbol:
-        raise ValidationError("Simbolo rechazado: solo acciones US (sin pares cripto)")
+        if not _CRYPTO_PAIR_RE.match(symbol):
+            raise ValidationError("Par cripto rechazado: formato invalido")
+        return symbol
     if not symbol or _UNSAFE_SYMBOL.search(symbol) or not _SYMBOL_RE.match(symbol):
         raise ValidationError("Simbolo rechazado: formato invalido")
     return symbol

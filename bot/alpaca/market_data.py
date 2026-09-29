@@ -36,6 +36,7 @@ _BAR_CACHE_TTL_SECONDS: dict[str, float] = {
     "15Min": 180.0,
     "30Min": 240.0,
     "1Hour": 400.0,
+    "4Hour": 500.0,
     "1Day": 600.0,
 }
 
@@ -59,6 +60,7 @@ _TIMEFRAMES: dict[str, TimeFrame] = {
     "15Min": TimeFrame(15, TimeFrameUnit.Minute),
     "30Min": TimeFrame(30, TimeFrameUnit.Minute),
     "1Hour": TimeFrame.Hour,
+    "4Hour": TimeFrame(4, TimeFrameUnit.Hour),
     "1Day": TimeFrame.Day,
 }
 
