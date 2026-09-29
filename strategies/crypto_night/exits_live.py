@@ -1,0 +1,120 @@
+"""Salidas live alineadas al backtest: 50%% @1R, trail runner, time stop 3h."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from strategies.crypto_night.position_book import NightTradeRecord
+from strategies.crypto_night.types import TradeSide
+
+
+MAX_HOLD_SECONDS = 3 * 3600
+TIME_STOP_MIN_R = 0.5
+
+
+@dataclass(frozen=True)
+class ExitDecision:
+    action: str  # hold | partial_1r | close_all | update_stop
+    close_qty: float = 0.0
+    new_runner_stop: float | None = None
+    reason: str = ""
+
+
+def _risk_dist(trade: NightTradeRecord) -> float:
+    if trade.entry_price is None:
+        return 0.0
+    return abs(float(trade.entry_price) - float(trade.stop_price))
+
+
+def current_r(trade: NightTradeRecord, last_price: float) -> float:
+    risk = _risk_dist(trade)
+    if risk <= 0 or trade.entry_price is None:
+        return 0.0
+    entry = float(trade.entry_price)
+    if trade.side == TradeSide.LONG.value:
+        return (last_price - entry) / risk
+    return (entry - last_price) / risk
+
+
+def stop_hit(trade: NightTradeRecord, last_price: float) -> bool:
+    stop = trade.runner_stop if trade.partial_taken else trade.stop_price
+    if trade.side == TradeSide.LONG.value:
+        return last_price <= stop
+    return last_price >= stop
+
+
+def evaluate_exit(trade: NightTradeRecord, last_price: float, now: datetime) -> ExitDecision:
+    if trade.entry_price is None or trade.qty_open <= 0:
+        return ExitDecision("hold")
+
+    risk = _risk_dist(trade)
+    if risk <= 0:
+        return ExitDecision("close_all", close_qty=trade.qty_open, reason="invalid_risk")
+
+    r = current_r(trade, last_price)
+    best = max(trade.best_r, r)
+
+    if stop_hit(trade, last_price):
+        return ExitDecision(
+            "close_all",
+            close_qty=trade.qty_open,
+            reason="stop",
+        )
+
+    if trade.entry_time_utc:
+        try:
+            opened = datetime.fromisoformat(trade.entry_time_utc.replace("Z", "+00:00"))
+            if opened.tzinfo is None:
+                opened = opened.replace(tzinfo=timezone.utc)
+            age = (now - opened.astimezone(timezone.utc)).total_seconds()
+        except ValueError:
+            age = 0.0
+        if age >= MAX_HOLD_SECONDS:
+            if best < TIME_STOP_MIN_R:
+                return ExitDecision(
+                    "close_all",
+                    close_qty=trade.qty_open,
+                    reason="time_stop",
+                )
+            return ExitDecision(
+                "close_all",
+                close_qty=trade.qty_open,
+                reason="time_exit",
+            )
+
+    if not trade.partial_taken and r >= 1.0:
+        entry = float(trade.entry_price)
+        if trade.side == TradeSide.LONG.value:
+            new_stop = entry + 0.3 * risk
+        else:
+            new_stop = entry - 0.3 * risk
+        half = trade.qty_open / 2.0
+        close_qty = half if half > 0 else trade.qty_open
+        return ExitDecision(
+            "partial_1r",
+            close_qty=close_qty,
+            new_runner_stop=new_stop,
+            reason="scale_1r",
+        )
+
+    if trade.partial_taken and r >= 2.0:
+        entry = float(trade.entry_price)
+        if trade.side == TradeSide.LONG.value:
+            trail = entry + 1.5 * risk
+            if trail > trade.runner_stop:
+                return ExitDecision(
+                    "update_stop",
+                    new_runner_stop=trail,
+                    reason="trail_2r",
+                )
+        else:
+            trail = entry - 1.5 * risk
+            if trail < trade.runner_stop:
+                return ExitDecision(
+                    "update_stop",
+                    new_runner_stop=trail,
+                    reason="trail_2r",
+                )
+
+    return ExitDecision("hold")

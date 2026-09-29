@@ -28,6 +28,19 @@ Estado riesgo: `data-crypto-night/crypto_night_state.json`. Tras el fix de calid
 
 **Cuenta:** usa paper **dedicada** o distinta de acciones si operas stocks de día (misma key = posiciones mezcladas).
 
+## Salidas (live, commit reciente)
+
+Tras **fill** de la limit: **stop GTC** en broker al `stop_price` del setup.
+
+Gestión software (cada poll):
+
+- **50% @ +1R**, runner stop a **+0.3R**
+- Trail runner a **+1.5R** si llega **+2R**
+- **Time stop 3h** si no llegó a +0.5R; cierre a las 3h si sí hubo movimiento
+- **Cierre total** al abrir sesión US (**09:30 ET**) para no mezclar con acciones
+
+Estado: `data-crypto-night/crypto_night_trades.json`
+
 Cambiar variante: editar `SWEEP_VARIANT` y `pm2 restart crypto-night --update-env`.
 
 ## Mapeo offline (PC o VPS sin PM2 stocks)

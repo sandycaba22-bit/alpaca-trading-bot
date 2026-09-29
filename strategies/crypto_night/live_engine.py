@@ -17,8 +17,20 @@ from bot.crypto_night_settings import CryptoNightSettings
 from bot.notify.telegram import TelegramNotifier
 from strategies.crypto_night.bias import resolve_night_bias
 from strategies.crypto_night.quality import score_setup
-from strategies.crypto_night.risk import NightRiskState, RiskLimits, can_open_trade
-from strategies.crypto_night.session import entries_allowed, in_night_trading_window
+from strategies.crypto_night.exits_live import ExitDecision, current_r, evaluate_exit
+from strategies.crypto_night.position_book import NightTradeRecord, load_trades, save_trades
+from strategies.crypto_night.risk import (
+    NightRiskState,
+    RiskLimits,
+    can_open_trade,
+    register_trade_result,
+)
+from strategies.crypto_night.session import (
+    entries_allowed,
+    in_night_trading_window,
+    should_flatten_crypto_positions,
+)
+from strategies.crypto_night.types import TradeSide
 from strategies.crypto_night.variants import find_setup_for_variant
 from strategies.crypto_night.volatility import volatility_gate
 
@@ -49,6 +61,7 @@ class CryptoNightEngine:
         self._shutdown = False
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         self._state_path = settings.data_dir / "crypto_night_state.json"
+        self._trades_path = settings.data_dir / "crypto_night_trades.json"
         self._kill_path = settings.data_dir / "crypto_night_kill_switch.json"
 
     def request_shutdown(self) -> None:
@@ -109,13 +122,16 @@ class CryptoNightEngine:
         return self.market.get_bars(symbol, tf, lookback, skip_cache=False)
 
     def run_once(self) -> None:
+        now = datetime.now(timezone.utc)
+        self._manage_lifecycle(now)
         if self._kill_switch_active():
             logger.info("Kill switch crypto_night activo — sin entradas")
             return
-        now = datetime.now(timezone.utc)
         if not in_night_trading_window(now):
             return
         if not entries_allowed(now):
+            return
+        if self._has_active_trade():
             return
 
         variant = self.settings.sweep_variant
@@ -159,13 +175,8 @@ class CryptoNightEngine:
                 setup.atr_1h = float(
                     bars_1h["close"].astype(float).diff().abs().rolling(14).mean().iloc[-1]
                 )
-            open_crypto = self._open_crypto_positions()
-            if len(open_crypto) >= self.settings.max_positions:
-                logger.info(
-                    "Sin trade | max_positions=%s (abiertas=%s)",
-                    self.settings.max_positions,
-                    ",".join(open_crypto) or "0",
-                )
+            if len(self._open_crypto_positions()) >= self.settings.max_positions:
+                logger.info("Sin trade | max_positions=%s en broker", self.settings.max_positions)
                 return
             tape = self.market.get_live_tape(symbol)
             spread = tape.spread_pct if tape else None
@@ -179,6 +190,226 @@ class CryptoNightEngine:
                 return
             self._maybe_place_limit(symbol, setup, bias)
             return
+
+    def _has_active_trade(self) -> bool:
+        return any(t.status in {"pending", "open"} for t in load_trades(self._trades_path))
+
+    def _manage_lifecycle(self, now: datetime) -> None:
+        trades = load_trades(self._trades_path)
+        if not trades:
+            return
+        broker_open = set(self._open_crypto_positions())
+        if should_flatten_crypto_positions(now):
+            for trade in trades:
+                if trade.status == "open" and trade.qty_open > 0:
+                    self._close_position(trade, trade.qty_open, "us_session_open")
+            save_trades(self._trades_path, trades)
+            return
+        for trade in list(trades):
+            if trade.status == "pending":
+                self._sync_pending_entry(trade)
+                continue
+            if trade.status != "open" or trade.qty_open <= 0:
+                continue
+            if trade.symbol not in broker_open:
+                trade.status = "closed"
+                trade.qty_open = 0.0
+                logger.info("%s | posicion cerrada en broker (stop/fill)", trade.symbol)
+                continue
+            tape = self.market.get_live_tape(trade.symbol)
+            if not tape or tape.last_price <= 0:
+                continue
+            px = float(tape.last_price)
+            trade.best_r = max(trade.best_r, current_r(trade, px))
+            decision = evaluate_exit(trade, px, now)
+            if decision.action == "hold":
+                continue
+            self._apply_exit_decision(trade, decision, px)
+        save_trades(self._trades_path, trades)
+
+    def _sync_pending_entry(self, trade: NightTradeRecord) -> bool:
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import StopOrderRequest
+
+        try:
+            order = self.client.trading.get_order_by_id(trade.entry_order_id)
+        except Exception as exc:
+            logger.debug("%s | pending sync: %s", trade.symbol, exc)
+            return False
+        status = getattr(order, "status", None)
+        status_s = str(status).lower() if status is not None else ""
+        if "canceled" in status_s or "expired" in status_s or "rejected" in status_s:
+            trade.status = "closed"
+            logger.info("%s | entrada cancelada/rechazada | %s", trade.symbol, status_s)
+            return True
+        if "filled" not in status_s and "partially_filled" not in status_s:
+            return False
+        fill_px = float(getattr(order, "filled_avg_price", 0) or trade.meta.get("limit_price", 0))
+        filled_qty = float(getattr(order, "filled_qty", 0) or trade.qty)
+        if fill_px <= 0 or filled_qty <= 0:
+            return False
+        trade.entry_price = fill_px
+        trade.qty = filled_qty
+        trade.qty_open = filled_qty
+        trade.runner_stop = trade.stop_price
+        trade.entry_time_utc = datetime.now(timezone.utc).isoformat()
+        trade.status = "open"
+        if not trade.meta.get("counted_night"):
+            self.risk.trades_tonight += 1
+            trade.meta["counted_night"] = True
+            self._save_risk_state()
+        stop_side = OrderSide.SELL if trade.side == TradeSide.LONG.value else OrderSide.BUY
+        try:
+            stop_order = self.client.trading.submit_order(
+                order_data=StopOrderRequest(
+                    symbol=trade.symbol,
+                    qty=round(trade.qty_open, 6),
+                    side=stop_side,
+                    stop_price=round(float(trade.stop_price), 2),
+                    time_in_force=TimeInForce.GTC,
+                )
+            )
+            trade.stop_order_id = str(getattr(stop_order, "id", "") or "")
+            logger.info(
+                "%s | entrada fill @ %.4f | stop broker @ %.4f id=%s",
+                trade.symbol,
+                fill_px,
+                trade.stop_price,
+                trade.stop_order_id,
+            )
+        except Exception as exc:
+            logger.warning("%s | stop broker fallo (gestion software): %s", trade.symbol, exc)
+        return True
+
+    def _apply_exit_decision(
+        self, trade: NightTradeRecord, decision: ExitDecision, last_price: float
+    ) -> bool:
+        if decision.action == "update_stop" and decision.new_runner_stop is not None:
+            trade.runner_stop = float(decision.new_runner_stop)
+            self._replace_stop_order(trade)
+            logger.info(
+                "%s | trail | runner_stop=%.4f (%s)",
+                trade.symbol,
+                trade.runner_stop,
+                decision.reason,
+            )
+            return True
+        if decision.action == "partial_1r":
+            close_qty = round(min(decision.close_qty, trade.qty_open), 6)
+            if close_qty <= 0:
+                return False
+            self._cancel_stop_order(trade)
+            self._market_close(trade, close_qty, decision.reason)
+            trade.qty_open = round(trade.qty_open - close_qty, 6)
+            trade.partial_taken = True
+            if decision.new_runner_stop is not None:
+                trade.runner_stop = float(decision.new_runner_stop)
+            register_trade_result(self.risk, self.limits, 0.5 * 1.0 * self.limits.risk_normal_pct)
+            self._save_risk_state()
+            if trade.qty_open > 0:
+                self._replace_stop_order(trade)
+            else:
+                trade.status = "closed"
+            logger.info(
+                "%s | parcial 1R | qty_rest=%s runner=%.4f",
+                trade.symbol,
+                trade.qty_open,
+                trade.runner_stop,
+            )
+            return True
+        if decision.action == "close_all":
+            qty = round(trade.qty_open, 6)
+            if qty <= 0:
+                trade.status = "closed"
+                return True
+            self._cancel_stop_order(trade)
+            self._close_position(trade, qty, decision.reason, last_price=last_price)
+            return True
+        return False
+
+    def _cancel_stop_order(self, trade: NightTradeRecord) -> None:
+        if not trade.stop_order_id:
+            return
+        try:
+            self.client.trading.cancel_order_by_id(trade.stop_order_id)
+        except Exception:
+            pass
+        trade.stop_order_id = ""
+
+    def _replace_stop_order(self, trade: NightTradeRecord) -> None:
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import StopOrderRequest
+
+        if trade.qty_open <= 0:
+            return
+        stop_side = OrderSide.SELL if trade.side == TradeSide.LONG.value else OrderSide.BUY
+        try:
+            stop_order = self.client.trading.submit_order(
+                order_data=StopOrderRequest(
+                    symbol=trade.symbol,
+                    qty=round(trade.qty_open, 6),
+                    side=stop_side,
+                    stop_price=round(float(trade.runner_stop), 2),
+                    time_in_force=TimeInForce.GTC,
+                )
+            )
+            trade.stop_order_id = str(getattr(stop_order, "id", "") or "")
+        except Exception as exc:
+            logger.warning("%s | re-stop fallo: %s", trade.symbol, exc)
+
+    def _market_close(self, trade: NightTradeRecord, qty: float, reason: str) -> None:
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import MarketOrderRequest
+
+        close_side = OrderSide.SELL if trade.side == TradeSide.LONG.value else OrderSide.BUY
+        try:
+            self.client.trading.submit_order(
+                order_data=MarketOrderRequest(
+                    symbol=trade.symbol,
+                    qty=round(qty, 6),
+                    side=close_side,
+                    time_in_force=TimeInForce.GTC,
+                )
+            )
+            logger.info("%s | cierre mercado qty=%s | %s", trade.symbol, qty, reason)
+        except Exception as exc:
+            logger.warning("%s | cierre fallo: %s", trade.symbol, exc)
+
+    def _close_position(
+        self,
+        trade: NightTradeRecord,
+        qty: float,
+        reason: str,
+        *,
+        last_price: float | None = None,
+    ) -> None:
+        self._market_close(trade, qty, reason)
+        r = 0.0
+        if last_price is not None and trade.entry_price:
+            r = current_r(trade, last_price)
+        register_trade_result(self.risk, self.limits, r * self.limits.risk_normal_pct)
+        self._save_risk_state()
+        trade.qty_open = 0.0
+        trade.status = "closed"
+        entry = float(trade.entry_price or 0.0)
+        exit_p = float(last_price if last_price is not None else entry)
+        if trade.side == TradeSide.LONG.value:
+            pnl_abs = (exit_p - entry) * qty
+        else:
+            pnl_abs = (entry - exit_p) * qty
+        notional = entry * qty if entry > 0 else 1.0
+        pnl_pct = (pnl_abs / notional) * 100.0
+        if self.notifier.enabled:
+            self.notifier.notify_closed(
+                trade.symbol,
+                qty,
+                entry,
+                exit_p,
+                pnl_abs,
+                pnl_pct,
+                reason,
+                self.settings.dry_run,
+            )
 
     def _maybe_place_limit(self, symbol: str, setup, bias) -> None:
         from alpaca.trading.enums import OrderSide, TimeInForce
@@ -234,9 +465,23 @@ class CryptoNightEngine:
                     client_order_id=cid[:48],
                 )
             )
-            self.risk.trades_tonight += 1
-            self._save_risk_state()
-            oid = getattr(order, "id", None)
+            oid = str(getattr(order, "id", "") or "")
+            trades = load_trades(self._trades_path)
+            trades.append(
+                NightTradeRecord(
+                    symbol=symbol,
+                    side=bias.side.value,
+                    variant=setup.variant,
+                    qty=qty,
+                    qty_open=qty,
+                    entry_order_id=oid,
+                    stop_price=float(setup.stop_price),
+                    runner_stop=float(setup.stop_price),
+                    status="pending",
+                    meta={"limit_price": float(setup.limit_price), "client_id": cid},
+                )
+            )
+            save_trades(self._trades_path, trades)
             msg = (
                 f"{setup.variant} limit {setup.limit_price:.2f} qty={qty} "
                 f"SL ref {setup.stop_price:.2f} id={cid}"
@@ -272,6 +517,11 @@ class CryptoNightEngine:
             4,
             self.limits.risk_normal_pct * 100,
             self.limits.max_trades_night,
+        )
+        logger.info(
+            "Salidas live | stop broker al fill | 50%% @1R | trail @2R | time 3h | "
+            "flat al abrir US (09:30 ET) | libro %s",
+            self._trades_path.name,
         )
         while not self._shutdown:
             try:

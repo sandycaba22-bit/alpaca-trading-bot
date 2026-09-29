@@ -72,3 +72,8 @@ def entries_allowed(dt: datetime) -> bool:
 def session_label(dt: datetime) -> str:
     et = _to_et(dt)
     return et.strftime("%Y-%m-%d %H:%M ET")
+
+
+def should_flatten_crypto_positions(dt: datetime) -> bool:
+    """Cierra cripto nocturna al abrir sesión US (no cruzar con acciones)."""
+    return is_us_regular_session(dt)
