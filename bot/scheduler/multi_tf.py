@@ -7,6 +7,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -207,12 +208,51 @@ class MultiTimeframeEngine:
         self.active_symbols: list[str] = initial_symbols
         self.trading_mode_label: str = trading_mode_label(initial_mode, profile)
         self._last_dormant_log_at: float = 0.0
+        self._market_session_open: bool | None = None
 
     def _stocks_market_dormant(self, clock) -> bool:
         return (
             self.engine.settings.bot_profile in {"stocks", "stocks_top50", "hybrid"}
             and not bool(clock.is_open)
         )
+
+    def _notify_market_session_if_changed(self, clock) -> None:
+        profile = self.engine.settings.bot_profile
+        if profile not in {"stocks", "stocks_top50", "hybrid"}:
+            return
+        if not self.engine.settings.telegram_notify_market_session:
+            return
+        if not clock.stock_feed_ok:
+            return
+        notifier = self.engine.notifier
+        if not notifier.enabled:
+            return
+
+        is_open = bool(clock.is_open)
+        if self._market_session_open is None:
+            self._market_session_open = is_open
+            return
+        if is_open == self._market_session_open:
+            return
+        self._market_session_open = is_open
+
+        session_day = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        kind = "open" if is_open else "close"
+        event_id = f"MARKET|us_stocks|{kind}|{session_day}"
+        sent = notifier.notify_market_session(
+            opened=is_open,
+            next_open=getattr(clock, "next_open", None),
+            next_close=getattr(clock, "next_close", None),
+            mode_label=self.trading_mode_label,
+            symbol_count=len(self.active_symbols),
+            event_id=event_id,
+        )
+        if sent:
+            logger.info(
+                "Telegram: aviso mercado US %s | event_id=%s",
+                "apertura" if is_open else "cierre",
+                event_id,
+            )
 
     def bootstrap(self) -> None:
         clock = self.engine.client.get_market_clock()
@@ -234,6 +274,7 @@ class MultiTimeframeEngine:
         clock = engine.client.get_market_clock()
         self._apply_trading_mode(clock)
         self._sync_intervals_for_mode()
+        self._notify_market_session_if_changed(clock)
 
         if self._stocks_market_dormant(clock):
             now_mono = time.monotonic()

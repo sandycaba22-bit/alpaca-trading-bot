@@ -174,6 +174,7 @@ class Settings:
     confirm_momentum_bars: int = 5
     entry_confirmation_enabled: bool = True
     telegram_notify_filtered: bool = False
+    telegram_notify_market_session: bool = True
     breakout_lookback_periods: int = 20
     breakout_lookback_overrides: dict[str, int] = field(default_factory=dict)
     breakout_volume_mult: float = 1.5
@@ -923,6 +924,9 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         entry_confirmation_enabled=_as_bool(os.getenv("ENTRY_CONFIRMATION_ENABLED"), default=True),
         telegram_notify_filtered=_as_bool(os.getenv("TELEGRAM_NOTIFY_FILTERED"), default=False),
+        telegram_notify_market_session=_as_bool(
+            os.getenv("TELEGRAM_NOTIFY_MARKET_SESSION"), default=True
+        ),
         breakout_lookback_periods=bounded_int(
             os.getenv("BREAKOUT_LOOKBACK_PERIODS"),
             20,

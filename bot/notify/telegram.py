@@ -8,7 +8,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
+from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from bot.runtime_paths import data_file
 from bot.security.secrets import mask_secret, register_secret
@@ -22,6 +25,21 @@ _EVENTS_MAX = 800
 
 def make_event_id(symbol: str, kind: str, signal_ts: str, operation: str) -> str:
     return f"{str(symbol).upper().strip()}|{str(kind).strip()}|{str(signal_ts).strip()}|{str(operation).strip()}"
+
+
+def _format_market_clock_dt(value: Any) -> str:
+    if value is None:
+        return "—"
+    try:
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        return dt.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+    except (TypeError, ValueError, OSError):
+        return str(value)
 
 
 class TelegramNotifier:
@@ -392,6 +410,34 @@ class TelegramNotifier:
             "Para PM2: data/live_confirm.txt con línea 1 CONFIRMO y línea 2 = account id live.",
         ]
         return self._send("\n".join(lines))
+
+    def notify_market_session(
+        self,
+        *,
+        opened: bool,
+        next_open: Any = None,
+        next_close: Any = None,
+        mode_label: str = "",
+        symbol_count: int = 0,
+        event_id: str | None = None,
+    ) -> bool:
+        """Aviso cuando el mercado de acciones US pasa de cerrado↔abierto (NYSE regular)."""
+        if opened:
+            icon = "🔔"
+            title = "Mercado US ABIERTO"
+            detail = "El bot sale de reposo y escanea señales (horario regular)."
+            next_line = f"Próximo cierre: {_format_market_clock_dt(next_close)}"
+        else:
+            icon = "🔕"
+            title = "Mercado US CERRADO"
+            detail = "Bot acciones en reposo (sin escaneo de capas)."
+            next_line = f"Próxima apertura: {_format_market_clock_dt(next_open)}"
+        lines = [f"{icon} {title}", detail, next_line]
+        if mode_label:
+            lines.append(f"Modo: {mode_label}")
+        if symbol_count > 0:
+            lines.append(f"Universo: {symbol_count} símbolos")
+        return self._send_event(event_id, "\n".join(lines))
 
     def notify_startup_smoke_test(self, *, symbols: str = "", tick_seconds: int = 60) -> bool:
         """Alerta obligatoria al arrancar — confirma token, chat_id y red."""
