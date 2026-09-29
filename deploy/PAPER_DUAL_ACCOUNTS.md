@@ -76,13 +76,25 @@ Pasos:
 4. `data-stocks/live_confirm.txt` según doc live.
 5. `pm2 restart trading-bot-stocks --update-env` — **no** mezcles keys live en `.env.stocks_top50`.
 
-## Si solo tienes **una** paper (plan B temporal)
+## Si solo tienes **una** paper (turnos horarios — recomendado hasta 2.ª cuenta)
 
-No es lo ideal. Opciones:
+Los dos PM2 pueden correr con la **misma API key** si repartes **solo compras nuevas** por hora (ET):
 
-1. **Un bot activo:** Top 50 **o** élite; el otro `paused: true` o PM2 stopped.
-2. **Misma paper, sin solapamiento:** élite solo `SLV,SPY` + símbolos fuera del Top 50 (pierdes OOS en TSLA/META en élite).
-3. Arreglar pronto la **segunda paper** (recomendado).
+| Bot | Variable | Horario ET |
+|-----|----------|------------|
+| Top 50 | `STOCK_ENTRY_WINDOW_ET=09:30-13:30` | Apertura → 13:30 |
+| Élite | `STOCK_ENTRY_WINDOW_ET=13:30-16:00` | 13:30 → cierre regular |
+
+Fuera de su ventana: **no escanea entradas** (ahorra API); **sí** mark-to-market y **cierres** (SL/trail) en posiciones abiertas. A las 13:30 el turno de compras pasa a élite.
+
+En el VPS, añade esas líneas a cada `.env` y `pm2 restart ... --update-env`. Log de arranque: `ventana entradas=09:30-13:30 ET`.
+
+Cuando saques la 2.ª paper, **quita** `STOCK_ENTRY_WINDOW_ET` en ambos (o déjalo vacío) para operar en paralelo sin turno.
+
+Otras opciones si no usas turnos:
+
+1. **Un bot activo:** Top 50 **o** élite; el otro pausado.
+2. Arreglar la **segunda paper** (ideal a medio plazo).
 
 Verificación:
 

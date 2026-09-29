@@ -21,6 +21,7 @@ from bot.security.sanitize import (
     parse_symbol_float_map,
     parse_symbol_int_map,
 )
+from bot.market.entry_window import StockEntryWindow, parse_stock_entry_window_et
 from bot.risk.stock_sizing import (
     resolve_max_notional_per_order,
     resolve_position_size_pct,
@@ -224,6 +225,7 @@ class Settings:
     entry_score_spike_favor_bonus: float = 20.0
     risk_percent_per_trade: float = 0.01
     daily_loss_limit_pct: float = 0.03
+    stock_entry_window: StockEntryWindow | None = None
     use_fixed_risk_sizing: bool = True
     market_stream_enabled: bool = True
     stream_stale_seconds: float = 120.0
@@ -1150,6 +1152,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
             max_value=0.20,
             name="DAILY_LOSS_LIMIT_PERCENT",
         ),
+        stock_entry_window=parse_stock_entry_window_et(os.getenv("STOCK_ENTRY_WINDOW_ET")),
         use_fixed_risk_sizing=_as_bool(os.getenv("USE_FIXED_RISK_SIZING"), default=True),
         market_stream_enabled=_as_bool(
             os.getenv("MARKET_STREAM_ENABLED"),

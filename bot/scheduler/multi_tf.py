@@ -21,6 +21,7 @@ from bot.market.assets import (
     positions_by_symbol,
 )
 from bot.runtime_paths import data_file
+from bot.market.entry_window import entry_window_allows
 from bot.market.mode import TradingMode, is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.security.exceptions import RateLimitError
 from bot.strategy.base import Signal
@@ -208,6 +209,7 @@ class MultiTimeframeEngine:
         self.active_symbols: list[str] = initial_symbols
         self.trading_mode_label: str = trading_mode_label(initial_mode, profile)
         self._last_dormant_log_at: float = 0.0
+        self._last_entry_window_log_at: float = 0.0
         self._market_session_open: bool | None = None
 
     def _stocks_market_dormant(self, clock) -> bool:
@@ -390,6 +392,21 @@ class MultiTimeframeEngine:
             except Exception:
                 pass
             self._sleep_between_crypto_symbols(mark_symbols, index)
+
+        settings = engine.settings
+        window = settings.stock_entry_window
+        if not entry_window_allows(window):
+            now_mono = time.monotonic()
+            if now_mono - self._last_entry_window_log_at >= 600.0:
+                label = window.label() if window else "n/a"
+                logger.info(
+                    "Ventana entradas cerrada | perfil=%s | turno=%s | "
+                    "mark/cierres activos; compras nuevas en el otro horario",
+                    settings.bot_profile,
+                    label,
+                )
+                self._last_entry_window_log_at = now_mono
+            return
 
         positions = positions_by_symbol(engine.executor.list_positions())
         active_symbols = list(self.active_symbols)

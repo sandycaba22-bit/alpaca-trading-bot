@@ -374,10 +374,13 @@ class TradingEngine:
                     self.settings.min_tp_pct * 100,
                 )
             if self.settings.use_fixed_risk_sizing:
+                window = self.settings.stock_entry_window
+                window_txt = window.label() if window else "24h (sin turno)"
                 logger.info(
                     "Acciones sizing | riesgo fijo %.2f%% equity | tope $/orden=%.0f | "
                     "tope %.1f%% equity/posición | max posiciones=%s | pérdida día -%.1f%% | "
-                    "protección pos -%.1f%% | mejor-señal/ciclo=%s | API datos/min=%s",
+                    "protección pos -%.1f%% | mejor-señal/ciclo=%s | API datos/min=%s | "
+                    "ventana entradas=%s",
                     self.settings.risk_percent_per_trade * 100,
                     self.settings.max_notional_per_order,
                     self.settings.position_size_pct * 100,
@@ -386,6 +389,7 @@ class TradingEngine:
                     self.settings.stock_capital_protection_max_loss_pct * 100,
                     self.settings.stock_trade_best_only,
                     self.settings.api_data_per_minute,
+                    window_txt,
                 )
         logger.info(
             "Trailing 2 etapas | BE max(%.2f%%, %.1fx ATR) buffer=%.2fx ATR | "
@@ -1730,6 +1734,17 @@ class TradingEngine:
             return
 
         if signal is Signal.BUY:
+            from bot.market.entry_window import entry_window_allows
+
+            window = self.settings.stock_entry_window
+            if not entry_window_allows(window):
+                label = window.label() if window else "n/a"
+                logger.info(
+                    "%s | BUY bloqueado — fuera de ventana horaria (%s)",
+                    symbol,
+                    label,
+                )
+                return
             if account is None:
                 logger.warning(
                     "%s | BUY bloqueado — no hay snapshot de cuenta ni cache reciente para dimensionar la orden",
