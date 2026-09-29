@@ -32,6 +32,9 @@ for ENV in .env.stocks .env.stocks_top50; do
   fi
 done
 
+echo "=== Separación élite / Top 50 (misma key = choque) ==="
+"${PYTHON}" scripts/verify_dual_stock_separation.py || true
+
 echo "=== Pausa (control.json) ==="
 for D in data-stocks data-stocks-top50; do
   F="${REPO_ROOT}/${D}/control.json"

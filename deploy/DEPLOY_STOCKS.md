@@ -2,8 +2,12 @@
 
 | Proceso | Env | PM2 | Puerto | Perfil |
 |---------|-----|-----|--------|--------|
-| Élite live vol_2x | `.env.stocks` | `trading-bot-stocks` | 3000 | `stocks` |
-| Top 50 paper vol_2x | `.env.stocks_top50` | `trading-bot-stocks-top50` | 3001 | `stocks_top50` |
+| Élite vol_2x | `.env.stocks` | `trading-bot-stocks` | 3000 | `stocks` |
+| Top 50 vol_2x | `.env.stocks_top50` | `trading-bot-stocks-top50` | 3001 | `stocks_top50` |
+
+**Paper sin choques:** dos cuentas Alpaca paper con **API keys distintas** (Paper A = élite, Paper B = Top 50). Guía: [`deploy/PAPER_DUAL_ACCOUNTS.md`](PAPER_DUAL_ACCOUNTS.md). Comprobar: `python scripts/verify_dual_stock_separation.py`.
+
+**Live más adelante:** solo cambia `.env.stocks` a live; Top 50 puede seguir en paper B.
 
 Plantillas: `deploy/stocks.env.example`, `deploy/stocks_top50.env.example`.
 
