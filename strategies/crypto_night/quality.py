@@ -16,7 +16,8 @@ def score_setup(
 ) -> QualityScore:
     spread_ok = spread_pct is not None and spread_pct <= 0.0005
     sweep_ok = True
-    atr_ok = atr_pct is not None and 30.0 <= atr_pct <= 70.0
+    # ATR% ya pasó candado vol (percentil 30–70 en 1H); aquí solo exigimos dato válido.
+    atr_ok = atr_pct is not None and atr_pct > 0
     vol_ok = setup.volume_ratio >= 1.5
     risk = abs(setup.limit_price - setup.stop_price)
     reward = abs(setup.limit_price - setup.sweep_extreme) * 2.0

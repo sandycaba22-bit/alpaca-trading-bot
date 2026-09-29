@@ -54,6 +54,48 @@ class CryptoNightEngine:
     def request_shutdown(self) -> None:
         self._shutdown = True
 
+    def _open_crypto_positions(self) -> list[str]:
+        try:
+            positions = self.client.trading.get_all_positions()
+            out: list[str] = []
+            for pos in positions:
+                sym = str(getattr(pos, "symbol", "") or "")
+                if "/" in sym and float(getattr(pos, "qty", 0) or 0) != 0:
+                    out.append(sym)
+            return out
+        except Exception as exc:
+            logger.warning("No se pudieron leer posiciones crypto: %s", exc)
+            return []
+
+    def _load_risk_state(self) -> None:
+        if not self._state_path.is_file():
+            return
+        try:
+            raw = json.loads(self._state_path.read_text(encoding="utf-8"))
+            self.risk.trades_tonight = int(raw.get("trades_tonight", 0))
+            self.risk.night_pnl_pct = float(raw.get("night_pnl_pct", 0.0))
+            self.risk.halted = bool(raw.get("halted", False))
+            self.risk.halt_reason = str(raw.get("halt_reason", ""))
+            self.risk.week_pnl_pct = float(raw.get("week_pnl_pct", 0.0))
+            self.risk.week_halted = bool(raw.get("week_halted", False))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+    def _save_risk_state(self) -> None:
+        payload = {
+            "trades_tonight": self.risk.trades_tonight,
+            "night_pnl_pct": self.risk.night_pnl_pct,
+            "halted": self.risk.halted,
+            "halt_reason": self.risk.halt_reason,
+            "week_pnl_pct": self.risk.week_pnl_pct,
+            "week_halted": self.risk.week_halted,
+            "updated_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            self._state_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("No se pudo guardar estado riesgo: %s", exc)
+
     def _kill_switch_active(self) -> bool:
         if not self._kill_path.is_file():
             return False
@@ -72,10 +114,8 @@ class CryptoNightEngine:
             return
         now = datetime.now(timezone.utc)
         if not in_night_trading_window(now):
-            logger.debug("Fuera de ventana nocturna")
             return
         if not entries_allowed(now):
-            logger.debug("Corte pre-apertura / sesion US")
             return
 
         variant = self.settings.sweep_variant
@@ -113,6 +153,20 @@ class CryptoNightEngine:
             )
             if setup is None:
                 continue
+            setup.symbol = symbol
+            setup.variant = variant.value
+            if len(bars_1h) > 14:
+                setup.atr_1h = float(
+                    bars_1h["close"].astype(float).diff().abs().rolling(14).mean().iloc[-1]
+                )
+            open_crypto = self._open_crypto_positions()
+            if len(open_crypto) >= self.settings.max_positions:
+                logger.info(
+                    "Sin trade | max_positions=%s (abiertas=%s)",
+                    self.settings.max_positions,
+                    ",".join(open_crypto) or "0",
+                )
+                return
             tape = self.market.get_live_tape(symbol)
             spread = tape.spread_pct if tape else None
             q = score_setup(setup, spread_pct=spread, atr_pct=atr_now, mode_min=4)
@@ -127,6 +181,16 @@ class CryptoNightEngine:
             return
 
     def _maybe_place_limit(self, symbol: str, setup, bias) -> None:
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import LimitOrderRequest
+
+        cid = f"{self.settings.client_order_prefix}{uuid.uuid4().hex[:12]}"
+        side = OrderSide.BUY if bias.side.value == "long" else OrderSide.SELL
+        risk_dist = abs(float(setup.limit_price) - float(setup.stop_price))
+        if risk_dist <= 0:
+            logger.info("%s | sin trade | stop inválido", symbol)
+            return
+
         if self.settings.dry_run:
             logger.info(
                 "DRY_RUN | %s %s limit=%.4f stop=%.4f variant=%s",
@@ -137,25 +201,77 @@ class CryptoNightEngine:
                 setup.variant,
             )
             return
-        cid = f"{self.settings.client_order_prefix}{uuid.uuid4().hex[:12]}"
+
+        try:
+            account = self.client.snapshot_account()
+        except Exception as exc:
+            logger.warning("%s | sin trade | cuenta: %s", symbol, exc)
+            return
+        risk_cash = float(account.equity) * self.limits.risk_normal_pct
+        qty = round(risk_cash / risk_dist, 6)
+        if qty <= 0:
+            logger.info("%s | sin trade | qty=0 equity=%.2f", symbol, account.equity)
+            return
+
         logger.info(
-            "Orden limite paper | client_order_id=%s | %s | variant=%s",
+            "Orden limite | client_order_id=%s | %s %s qty=%s @ %.4f SL ref=%.4f variant=%s",
             cid,
+            side.value,
             symbol,
+            qty,
+            setup.limit_price,
+            setup.stop_price,
             setup.variant,
         )
-        self.notifier.notify_signal_filtered(
-            symbol,
-            bias.side.value,
-            f"{setup.variant} limit~{setup.limit_price:.2f} SL~{setup.stop_price:.2f} id={cid}",
-        )
+        try:
+            order = self.client.trading.submit_order(
+                order_data=LimitOrderRequest(
+                    symbol=symbol,
+                    qty=qty,
+                    side=side,
+                    time_in_force=TimeInForce.GTC,
+                    limit_price=round(float(setup.limit_price), 2),
+                    client_order_id=cid[:48],
+                )
+            )
+            self.risk.trades_tonight += 1
+            self._save_risk_state()
+            oid = getattr(order, "id", None)
+            msg = (
+                f"{setup.variant} limit {setup.limit_price:.2f} qty={qty} "
+                f"SL ref {setup.stop_price:.2f} id={cid}"
+            )
+            if self.notifier.enabled:
+                self.notifier.notify_opened(
+                    symbol,
+                    side.value,
+                    qty,
+                    setup.limit_price,
+                    msg,
+                    self.settings.dry_run,
+                    stop_price=setup.stop_price,
+                )
+            logger.info("%s | orden enviada | broker_id=%s", symbol, oid)
+        except Exception as exc:
+            logger.warning("%s | orden rechazada | %s", symbol, exc)
 
     def run_loop(self) -> None:
+        self._load_risk_state()
         logger.info(
-            "Crypto Night Fortress | variant=%s | symbols=%s | paper=%s",
+            "Crypto Night Fortress | variant=%s | symbols=%s | paper=%s | dry_run=%s",
             self.settings.sweep_variant.value,
             ",".join(self.settings.symbols),
             self.settings.paper,
+            self.settings.dry_run,
+        )
+        logger.info(
+            "Candados activos | (1) sesion US off→open ET | (2) ATR%% 1H p30-70 | "
+            "(3) bias 4H+1D | (4) setup variante %s | (5) score>=%s/5 R net>=1.8 | "
+            "riesgo: %.2f%%/trade max %s/noche kill -1%% noche -3%% semana",
+            self.settings.sweep_variant.value,
+            4,
+            self.limits.risk_normal_pct * 100,
+            self.limits.max_trades_night,
         )
         while not self._shutdown:
             try:
