@@ -14,6 +14,7 @@ import pandas as pd
 from bot.alpaca.client import AlpacaClient
 from bot.alpaca.market_data import MarketDataService
 from bot.config import PROJECT_ROOT, load_settings
+from bot.market.bars_cache import load_or_fetch as _bars_load_or_fetch
 from bot.market.assets import is_crypto_symbol
 from bot.risk.stops import ExitReason, StopTakeProfitPolicy
 from bot.strategy.base import Signal, StrategyContext
@@ -25,7 +26,6 @@ from bot.storage.breakout_state import BreakoutStateStore
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(message)s")
 
-CACHE = PROJECT_ROOT / "data" / "bars_cache"
 OUT = PROJECT_ROOT / "logs" / "trailing_atr_sweep.csv"
 SYMBOLS = ("AAPL", "MSFT", "BTC/USD", "ETH/USD")
 ACTIVATE = (0.4, 0.5, 0.6, 0.75)
@@ -37,31 +37,14 @@ def _entry_tf(symbol: str) -> str:
     return "15Min" if is_crypto_symbol(symbol) else "5Min"
 
 
-def _cache_path(symbol: str, tf: str) -> Path:
-    safe = symbol.replace("/", "-")
-    return CACHE / f"{safe}_{tf}.pkl"
-
-
 def _entries_cache_path(symbol: str) -> Path:
-    return CACHE / f"{symbol.replace('/', '-')}_entries.pkl"
+    from bot.market.bars_cache import cache_dir
+
+    return cache_dir() / f"{symbol.replace('/', '-')}_entries.pkl"
 
 
 def _load_or_fetch(market: MarketDataService, symbol: str, tf: str, start, end) -> pd.DataFrame:
-    CACHE.mkdir(parents=True, exist_ok=True)
-    path = _cache_path(symbol, tf)
-    if path.exists():
-        bars = pickle.loads(path.read_bytes())
-        if isinstance(bars, pd.DataFrame) and not bars.empty:
-            print(f"cache {symbol} {tf} bars={len(bars)} {bars.index.min()}->{bars.index.max()}")
-            return bars
-    print(f"fetch {symbol} {tf} {start.date()}->{end.date()} ...")
-    bars = market.get_bars_range(symbol, tf, start=start, end=end)
-    if not bars.empty:
-        path.write_bytes(pickle.dumps(bars, protocol=pickle.HIGHEST_PROTOCOL))
-        print(f"saved {symbol} {tf} bars={len(bars)}")
-    else:
-        print(f"empty {symbol} {tf}")
-    return bars
+    return _bars_load_or_fetch(market, symbol, tf, start, end, force=False)
 
 
 def _policy(settings, *, activate: float, buffer: float, two_stage: bool) -> StopTakeProfitPolicy:

@@ -22,6 +22,8 @@ python main.py
 
 `--backtest` descarga 6 años de velas OHLC, entrena 3 años y valida/optimiza los 3 siguientes. Los parámetros quedan en `data/strategy_params.json` y los usa el loop en vivo.
 
+**Cache histórica (research, no live):** `python scripts/warm_bars_cache.py --preset crypto_night` (presets por bot; datos en `data/bars_cache/`, fuera de git). Ver [`docs/bars_cache.md`](docs/bars_cache.md).
+
 `DRY_RUN=true` registra órdenes sin enviarlas. Pon `DRY_RUN=false` para ejecutar en paper.
 
 Telegram: configura `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` en `.env`. El bot avisa cada compra/venta con precio y P&L. El botón Activar/Detener del panel pausa el loop y cancela órdenes pendientes.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pickle
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,6 +10,7 @@ import pandas as pd
 
 from bot.alpaca.market_data import MarketDataService
 from bot.config import PROJECT_ROOT, Settings
+from bot.market.bars_cache import load_or_fetch as _bars_load_or_fetch
 from bot.risk.stops import StopTakeProfitPolicy
 from bot.strategy.base import Signal, StrategyContext
 from bot.strategy.indicators import last_atr, momentum_pct
@@ -19,7 +19,6 @@ from bot.strategy.multi_tf_analysis import analyze_trend
 from bot.strategy.signal_filters import SignalFilterLayer
 from bot.storage.breakout_state import BreakoutStateStore
 
-CACHE = PROJECT_ROOT / "data" / "bars_cache"
 SYMBOLS = ("BTC/USD", "ETH/USD")
 ENTRY_TFS = ("15Min", "1Hour")
 RATIO_GRID = (0.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0)
@@ -113,32 +112,16 @@ def crypto_policy(settings: Settings) -> StopTakeProfitPolicy:
     )
 
 
-def _cache_path(symbol: str, tf: str) -> Path:
-    return CACHE / f"{symbol.replace('/', '-')}_{tf}.pkl"
-
-
 def _candidates_cache_path(symbol: str, entry_tf: str, confirm_tf: str) -> Path:
-    return CACHE / f"{symbol.replace('/', '-')}_{entry_tf}_{confirm_tf}_tp_candidates_v2.pkl"
+    from bot.market.bars_cache import cache_dir
+
+    return cache_dir() / f"{symbol.replace('/', '-')}_{entry_tf}_{confirm_tf}_tp_candidates_v2.pkl"
 
 
 def load_or_fetch(
     market: MarketDataService, symbol: str, tf: str, start: datetime, end: datetime
 ) -> pd.DataFrame:
-    CACHE.mkdir(parents=True, exist_ok=True)
-    path = _cache_path(symbol, tf)
-    if path.exists():
-        bars = pickle.loads(path.read_bytes())
-        if isinstance(bars, pd.DataFrame) and not bars.empty:
-            print(f"cache {symbol} {tf} bars={len(bars)} {bars.index.min()}->{bars.index.max()}")
-            return bars
-    print(f"fetch {symbol} {tf} {start.date()}->{end.date()} ...")
-    bars = market.get_bars_range(symbol, tf, start=start, end=end)
-    if not bars.empty:
-        path.write_bytes(pickle.dumps(bars, protocol=pickle.HIGHEST_PROTOCOL))
-        print(f"saved {symbol} {tf} bars={len(bars)}")
-    else:
-        print(f"empty {symbol} {tf}")
-    return bars
+    return _bars_load_or_fetch(market, symbol, tf, start, end, force=False)
 
 
 def _confirm_ok(
