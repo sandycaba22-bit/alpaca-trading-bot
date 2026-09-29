@@ -1734,7 +1734,7 @@ class TradingEngine:
             return
 
         if signal is Signal.BUY:
-            from bot.market.entry_window import entry_window_allows
+            from bot.entry_window import entry_window_allows
 
             window = self.settings.stock_entry_window
             if not entry_window_allows(window):

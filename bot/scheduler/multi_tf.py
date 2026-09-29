@@ -21,7 +21,7 @@ from bot.market.assets import (
     positions_by_symbol,
 )
 from bot.runtime_paths import data_file
-from bot.market.entry_window import entry_window_allows
+from bot.entry_window import entry_window_allows
 from bot.market.mode import TradingMode, is_symbol_tradable, resolve_trading_mode, trading_mode_label
 from bot.security.exceptions import RateLimitError
 from bot.strategy.base import Signal

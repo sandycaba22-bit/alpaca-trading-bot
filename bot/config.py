@@ -21,13 +21,7 @@ from bot.security.sanitize import (
     parse_symbol_float_map,
     parse_symbol_int_map,
 )
-from bot.market.entry_window import StockEntryWindow, parse_stock_entry_window_et
-from bot.risk.stock_sizing import (
-    resolve_max_notional_per_order,
-    resolve_position_size_pct,
-    resolve_risk_percent_per_trade,
-    sizing_override_note,
-)
+from bot.entry_window import StockEntryWindow, parse_stock_entry_window_et
 from bot.security.secrets import register_secret
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -346,6 +340,13 @@ def load_settings(env_path: Path | None = None) -> Settings:
             if not env_path.is_absolute():
                 env_path = PROJECT_ROOT / env_path
     load_dotenv(env_path or PROJECT_ROOT / ".env")
+
+    from bot.risk.stock_sizing import (
+        resolve_max_notional_per_order,
+        resolve_position_size_pct,
+        resolve_risk_percent_per_trade,
+        sizing_override_note,
+    )
 
     bot_profile = _parse_bot_profile(os.getenv("BOT_PROFILE"))
 

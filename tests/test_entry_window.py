@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from bot.market.entry_window import entry_window_allows, parse_stock_entry_window_et
+from bot.entry_window import entry_window_allows, parse_stock_entry_window_et
 
 ET = ZoneInfo("America/New_York")
 
