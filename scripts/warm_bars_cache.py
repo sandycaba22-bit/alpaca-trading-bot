@@ -25,10 +25,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from dotenv import load_dotenv
+
 from bot.alpaca.client import AlpacaClient
 from bot.alpaca.market_data import MarketDataService, resolve_stock_data_feed
-from bot.config import load_settings
+from bot.config import PROJECT_ROOT, load_settings
 from bot.market.bars_cache import DEFAULT_YEARS, WARM_PRESETS, cache_dir, warm_many
+
+_WARM_BOT_PROFILES = frozenset({"stocks", "stocks_top50", "hybrid"})
 
 
 def main() -> int:
@@ -54,9 +58,15 @@ def main() -> int:
     if not args.presets and not args.symbols:
         parser.error("Indica --preset (uno o más) o --symbols")
 
+    env_path = Path(args.env_file)
+    if not env_path.is_absolute():
+        env_path = PROJECT_ROOT / env_path
     if args.env_file:
         os.environ["ENV_FILE"] = args.env_file
-    settings = load_settings()
+    load_dotenv(env_path if env_path.is_file() else PROJECT_ROOT / ".env")
+    if os.getenv("BOT_PROFILE", "").strip() not in _WARM_BOT_PROFILES:
+        os.environ["BOT_PROFILE"] = "stocks"
+    settings = load_settings(env_path if env_path.is_file() else None)
     client = AlpacaClient(settings)
     feed = resolve_stock_data_feed(getattr(settings, "stock_data_feed", None))
     market = MarketDataService(client, feed=feed)
@@ -76,6 +86,16 @@ def main() -> int:
 
     if not symbols or not timeframes:
         print("Sin símbolos o timeframes.", file=sys.stderr)
+        return 1
+
+    try:
+        settings.validate()
+    except Exception as exc:
+        print(
+            "No se puede descargar velas: revisa APCA_API_KEY_ID y APCA_API_SECRET_KEY "
+            f"en {env_path if env_path.is_file() else PROJECT_ROOT / '.env'} ({exc})",
+            file=sys.stderr,
+        )
         return 1
 
     out_dir = cache_dir()
