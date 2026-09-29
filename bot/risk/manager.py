@@ -165,11 +165,16 @@ class RiskManager:
                 effective_sl = self.settings.stock_atr_sl_mult
 
         if self.settings.use_fixed_risk_sizing:
-            qty = self._qty_from_risk(
+            qty, raw_qty, sl_dist = self._qty_from_risk_with_detail(
                 symbol, last_price, account.equity, atr_value, effective_sl, cap_notional
             )
             if qty <= 0:
-                return RiskDecision(False, 0.0, "riesgo fijo no alcanza cantidad mínima")
+                reason = (
+                    "riesgo fijo no alcanza cantidad mínima "
+                    f"(cap_notional={cap_notional:.2f} precio={last_price:.2f} "
+                    f"qty_bruta={raw_qty:.3f} sl_dist={sl_dist:.4f})"
+                )
+                return RiskDecision(False, 0.0, reason)
             sl_dist = self._stop_distance(symbol, last_price, atr_value, effective_sl)
             logger.info(
                 "Riesgo OK | %s BUY qty=%s notional~%.2f | riesgo fijo %.2f%% equity "
@@ -216,6 +221,24 @@ class RiskManager:
         policy = self._stops_for(symbol)
         return last_price * policy.stop_loss_pct
 
+    def _qty_from_risk_with_detail(
+        self,
+        symbol: str,
+        last_price: float,
+        equity: float,
+        atr_value: float | None,
+        atr_sl_mult: float | None,
+        cap_notional: float,
+    ) -> tuple[float, float, float]:
+        sl_dist = self._stop_distance(symbol, last_price, atr_value, atr_sl_mult)
+        if sl_dist <= 0 or last_price <= 0:
+            return 0.0, 0.0, sl_dist
+        risk_cash = equity * self.settings.risk_percent_per_trade
+        raw_qty = risk_cash / sl_dist
+        max_qty = cap_notional / last_price
+        qty = min(raw_qty, max_qty)
+        return self._normalize_qty(symbol, qty), float(raw_qty), float(sl_dist)
+
     def _qty_from_risk(
         self,
         symbol: str,
@@ -225,14 +248,10 @@ class RiskManager:
         atr_sl_mult: float | None,
         cap_notional: float,
     ) -> float:
-        sl_dist = self._stop_distance(symbol, last_price, atr_value, atr_sl_mult)
-        if sl_dist <= 0 or last_price <= 0:
-            return 0.0
-        risk_cash = equity * self.settings.risk_percent_per_trade
-        raw_qty = risk_cash / sl_dist
-        max_qty = cap_notional / last_price
-        qty = min(raw_qty, max_qty)
-        return self._normalize_qty(symbol, qty)
+        qty, _, _ = self._qty_from_risk_with_detail(
+            symbol, last_price, equity, atr_value, atr_sl_mult, cap_notional
+        )
+        return qty
 
     def _qty_from_notional(self, symbol: str, last_price: float, notional: float) -> float:
         return self._normalize_qty(symbol, notional / last_price)

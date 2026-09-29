@@ -341,7 +341,7 @@ class TradingEngine:
                 logger.warning(
                     "Cripto entradas OFF — asimétrico 1H/4H apagado (CRYPTO_ASYMMETRIC_LIVE_ENABLED=false)"
                 )
-        if self.settings.bot_profile == "stocks":
+        if self.settings.bot_profile in {"stocks", "stocks_top50"}:
             if (
                 not self.settings.sync_entry_enabled
                 and float(self.settings.stock_entry_signal_volume_mult) > 0
@@ -372,6 +372,20 @@ class TradingEngine:
                     self.settings.stock_atr_sl_mult,
                     self.settings.atr_trailing_mult,
                     self.settings.min_tp_pct * 100,
+                )
+            if self.settings.use_fixed_risk_sizing:
+                logger.info(
+                    "Acciones sizing | riesgo fijo %.2f%% equity | tope $/orden=%.0f | "
+                    "tope %.1f%% equity/posición | max posiciones=%s | pérdida día -%.1f%% | "
+                    "protección pos -%.1f%% | mejor-señal/ciclo=%s | API datos/min=%s",
+                    self.settings.risk_percent_per_trade * 100,
+                    self.settings.max_notional_per_order,
+                    self.settings.position_size_pct * 100,
+                    self.settings.max_open_positions,
+                    self.settings.daily_loss_limit_pct * 100,
+                    self.settings.stock_capital_protection_max_loss_pct * 100,
+                    self.settings.stock_trade_best_only,
+                    self.settings.api_data_per_minute,
                 )
         logger.info(
             "Trailing 2 etapas | BE max(%.2f%%, %.1fx ATR) buffer=%.2fx ATR | "

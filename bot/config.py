@@ -21,6 +21,12 @@ from bot.security.sanitize import (
     parse_symbol_float_map,
     parse_symbol_int_map,
 )
+from bot.risk.stock_sizing import (
+    resolve_max_notional_per_order,
+    resolve_position_size_pct,
+    resolve_risk_percent_per_trade,
+    sizing_override_note,
+)
 from bot.security.secrets import register_secret
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -460,11 +466,9 @@ def load_settings(env_path: Path | None = None) -> Settings:
         max_open_positions=bounded_int(
             os.getenv("MAX_OPEN_POSITIONS"), 3, min_value=1, max_value=20, name="MAX_OPEN_POSITIONS"
         ),
-        position_size_pct=bounded_float(
-            os.getenv("POSITION_SIZE_PCT"), 0.05, min_value=0.001, max_value=0.25, name="POSITION_SIZE_PCT"
-        ),
-        max_notional_per_order=bounded_float(
-            os.getenv("MAX_NOTIONAL_PER_ORDER"), 2000.0, min_value=1.0, max_value=50_000.0, name="MAX_NOTIONAL_PER_ORDER"
+        position_size_pct=resolve_position_size_pct(paper=paper, bot_profile=bot_profile),
+        max_notional_per_order=resolve_max_notional_per_order(
+            paper=paper, bot_profile=bot_profile
         ),
         allow_short=_as_bool(os.getenv("ALLOW_SHORT"), default=False),
         stop_loss_pct=bounded_float(
@@ -577,7 +581,11 @@ def load_settings(env_path: Path | None = None) -> Settings:
             os.getenv("BACKTEST_CASH"), 100_000.0, min_value=1000.0, max_value=10_000_000.0, name="BACKTEST_CASH"
         ),
         api_data_per_minute=bounded_int(
-            os.getenv("API_DATA_PER_MINUTE"), 120, min_value=10, max_value=200, name="API_DATA_PER_MINUTE"
+            os.getenv("API_DATA_PER_MINUTE"),
+            180 if bot_profile == "stocks_top50" else 120,
+            min_value=10,
+            max_value=200,
+            name="API_DATA_PER_MINUTE",
         ),
         order_per_minute=bounded_int(
             os.getenv("ORDER_PER_MINUTE"), 10, min_value=1, max_value=30, name="ORDER_PER_MINUTE"
@@ -856,7 +864,10 @@ def load_settings(env_path: Path | None = None) -> Settings:
             max_value=6.0,
             name="STOCK_ASYMMETRIC_TRAIL_ATR_MULT",
         ),
-        stock_trade_best_only=_as_bool(os.getenv("STOCK_TRADE_BEST_ONLY"), default=False),
+        stock_trade_best_only=_as_bool(
+            os.getenv("STOCK_TRADE_BEST_ONLY"),
+            default=bot_profile in {"stocks", "stocks_top50"},
+        ),
         stock_entry_score_min=_resolve_profile_entry_score_min(
             os.getenv("STOCK_ENTRY_SCORE_MIN"),
             os.getenv("ENTRY_SCORE_MIN"),
@@ -872,7 +883,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         capital_protection_enabled=_as_bool(os.getenv("CAPITAL_PROTECTION_ENABLED"), default=True),
         stock_capital_protection_max_loss_pct=bounded_float(
             os.getenv("STOCK_CAPITAL_PROTECTION_MAX_LOSS_PCT"),
-            0.04,
+            0.03 if bot_profile in {"stocks", "stocks_top50"} else 0.04,
             min_value=0.005,
             max_value=0.20,
             name="STOCK_CAPITAL_PROTECTION_MAX_LOSS_PCT",
@@ -1129,16 +1140,12 @@ def load_settings(env_path: Path | None = None) -> Settings:
             max_value=3.0,
             name="SYNC_ENTRY_VOLUME_MULT_CRYPTO",
         ),
-        risk_percent_per_trade=bounded_float(
-            os.getenv("RISK_PERCENT_PER_TRADE"),
-            0.01,
-            min_value=0.001,
-            max_value=0.05,
-            name="RISK_PERCENT_PER_TRADE",
+        risk_percent_per_trade=resolve_risk_percent_per_trade(
+            paper=paper, bot_profile=bot_profile
         ),
         daily_loss_limit_pct=bounded_float(
             os.getenv("DAILY_LOSS_LIMIT_PERCENT"),
-            0.03,
+            0.025 if bot_profile in {"stocks", "stocks_top50"} else 0.03,
             min_value=0.005,
             max_value=0.20,
             name="DAILY_LOSS_LIMIT_PERCENT",
@@ -1264,6 +1271,11 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
     )
     settings.validate()
+    note = sizing_override_note(paper=paper, bot_profile=bot_profile)
+    if note:
+        import logging
+
+        logging.getLogger(__name__).warning("Sizing paper | %s", note)
     return settings
 
 

@@ -50,6 +50,8 @@ ENV_FILE=.env.stocks_top50 "${PYTHON}" scripts/close_broker_symbol.py --list || 
 echo "=== Claves operativas ==="
 grep -E '^(SYMBOLS|MARKET_STREAM_ENABLED|BOT_PROFILE|APCA_API_BASE_URL)=' .env.stocks 2>/dev/null | head -20
 grep -E '^(SYMBOLS|MARKET_STREAM_ENABLED|BOT_PROFILE|APCA_API_BASE_URL)=' .env.stocks_top50 2>/dev/null | head -20
+echo "=== Sizing (riesgo fijo) ==="
+grep -E '^(RISK_PERCENT|MAX_NOTIONAL|POSITION_SIZE|USE_FIXED_RISK)=' .env.stocks .env.stocks_top50 2>/dev/null || true
 
 if [[ "${RESTART}" == true ]]; then
   echo "=== PM2 restart bots (no web) ==="
