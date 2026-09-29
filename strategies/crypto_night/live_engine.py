@@ -149,7 +149,11 @@ class CryptoNightEngine:
                 logger.info("%s | candado vol | %s", symbol, vgate.detail)
                 continue
             bgate, bias = resolve_night_bias(
-                bars_4h, bars_1d, symbol, btc_bias=btc_bias
+                bars_4h,
+                bars_1d,
+                symbol,
+                btc_bias=btc_bias,
+                bias_mode=self.settings.bias_mode,
             )
             if not bgate.ok or bias is None:
                 logger.info("%s | candado bias | %s", symbol, bgate.detail)
@@ -509,10 +513,12 @@ class CryptoNightEngine:
             self.settings.paper,
             self.settings.dry_run,
         )
+        bias_label = "4H+1D" if self.settings.bias_mode == "4h_1d" else "4H only"
         logger.info(
             "Candados activos | (1) sesion US off→open ET | (2) ATR%% 1H p30-70 | "
-            "(3) bias 4H+1D | (4) setup variante %s | (5) score>=%s/5 R net>=1.8 | "
+            "(3) bias %s | (4) setup variante %s | (5) score>=%s/5 R net>=1.8 | "
             "riesgo: %.2f%%/trade max %s/noche kill -1%% noche -3%% semana",
+            bias_label,
             self.settings.sweep_variant.value,
             4,
             self.limits.risk_normal_pct * 100,

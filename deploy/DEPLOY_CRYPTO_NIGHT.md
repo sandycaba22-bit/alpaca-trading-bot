@@ -18,7 +18,7 @@ Kill switch solo cripto: `echo '{"halt":true}' > data-crypto-night/crypto_night_
 
 1. **Sesión** — solo entre cierre US (16:00 ET) y apertura (09:30 ET); off viernes noche y domingo; corte 09:00–09:30 ET.
 2. **Volatilidad** — ATR% 1H dentro del percentil 30–70 (20 días).
-3. **Bias** — 4H y 1D alineados (long/short); ETH puede heredar bias de BTC.
+3. **Bias** — por defecto estricto **4H+1D**; en paper puedes probar `CRYPTO_NIGHT_BIAS_MODE=4h_only` (solo 4H). ETH puede heredar bias de BTC.
 4. **Setup** — patrón sweep/reclaim de la variante `SWEEP_VARIANT` (V1 por defecto).
 5. **Calidad** — score ≥ 4/5 y R teórico neto ≥ 1.8 (spread, volumen, SL vs ATR).
 

@@ -24,15 +24,37 @@ def _swing_bias(bars: pd.DataFrame, lookback: int = 6) -> TradeSide | None:
     return None
 
 
+def parse_bias_mode(raw: str | None) -> str:
+    key = (raw or "4h_1d").strip().lower().replace("-", "_")
+    if key in {"4h_only", "4h", "only_4h"}:
+        return "4h_only"
+    if key in {"4h_1d", "4h1d", "strict", "default"}:
+        return "4h_1d"
+    raise ValueError(f"CRYPTO_NIGHT_BIAS_MODE invalido: {raw!r} (4h_1d | 4h_only)")
+
+
 def resolve_night_bias(
     bars_4h: pd.DataFrame,
     bars_1d: pd.DataFrame,
     symbol: str,
     *,
     btc_bias: NightBias | None = None,
+    bias_mode: str = "4h_1d",
 ) -> tuple[GateResult, NightBias | None]:
+    mode = parse_bias_mode(bias_mode)
     b4 = _swing_bias(bars_4h)
     b1 = _swing_bias(bars_1d, lookback=5)
+
+    if mode == "4h_only":
+        if b4 is not None:
+            return (
+                GateResult(True),
+                NightBias(side=b4, symbol=symbol, reason=f"4H only {b4.value}"),
+            )
+        if symbol.upper().startswith("ETH") and btc_bias is not None:
+            return GateResult(True), btc_bias
+        return GateResult(False, RejectReason.BIAS, "4H sin estructura clara"), None
+
     if b4 is None or b1 is None or b4 != b1:
         if symbol.upper().startswith("ETH") and btc_bias is not None:
             return GateResult(True), btc_bias

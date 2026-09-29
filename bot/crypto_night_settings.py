@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from bot.config import PROJECT_ROOT, ValidationError
 from bot.security.sanitize import sanitize_api_base_url, sanitize_telegram_chat_id, sanitize_telegram_token
 from bot.security.secrets import register_secret
+from strategies.crypto_night.bias import parse_bias_mode
 from strategies.crypto_night.variants import SweepVariant, parse_sweep_variant
 
 
@@ -32,6 +33,7 @@ class CryptoNightSettings:
     dry_run: bool
     client_order_prefix: str
     max_positions: int
+    bias_mode: str
 
 
 def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSettings:
@@ -61,6 +63,10 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
     syms_raw = os.getenv("SYMBOLS", "BTC/USD,ETH/USD")
     symbols = tuple(s.strip() for s in syms_raw.split(",") if s.strip())
     variant = parse_sweep_variant(os.getenv("SWEEP_VARIANT", "V1"))
+    try:
+        bias_mode = parse_bias_mode(os.getenv("CRYPTO_NIGHT_BIAS_MODE", "4h_1d"))
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
 
     tg_token = sanitize_telegram_token(os.getenv("TELEGRAM_BOT_TOKEN"))
     tg_chat = sanitize_telegram_chat_id(os.getenv("TELEGRAM_CHAT_ID"))
@@ -84,4 +90,5 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         dry_run=os.getenv("DRY_RUN", "false").strip().lower() in {"1", "true", "yes"},
         client_order_prefix=(os.getenv("CLIENT_ORDER_PREFIX") or "CN-").strip()[:8],
         max_positions=int(os.getenv("MAX_POSITIONS", "1")),
+        bias_mode=bias_mode,
     )
