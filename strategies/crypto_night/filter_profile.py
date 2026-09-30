@@ -1,0 +1,61 @@
+"""Perfiles de candados crypto night — mismos 5 filtros, distinta exigencia."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class CryptoNightFilters:
+    vol_pct_low: float
+    vol_pct_high: float
+    bias_swing_lookback_4h: int
+    bias_swing_lookback_1d: int
+    bias_relaxed_structure: bool
+    setup_min_volume_ratio: float
+    setup_v1_max_bars: int
+    quality_min_score: int
+    quality_min_theoretical_r: float
+    quality_max_spread_pct: float
+
+
+STRICT = CryptoNightFilters(
+    vol_pct_low=30.0,
+    vol_pct_high=70.0,
+    bias_swing_lookback_4h=6,
+    bias_swing_lookback_1d=5,
+    bias_relaxed_structure=False,
+    setup_min_volume_ratio=1.5,
+    setup_v1_max_bars=3,
+    quality_min_score=4,
+    quality_min_theoretical_r=1.8,
+    quality_max_spread_pct=0.0005,
+)
+
+RELAXED = CryptoNightFilters(
+    vol_pct_low=20.0,
+    vol_pct_high=80.0,
+    bias_swing_lookback_4h=4,
+    bias_swing_lookback_1d=4,
+    bias_relaxed_structure=True,
+    setup_min_volume_ratio=1.2,
+    setup_v1_max_bars=10,
+    quality_min_score=3,
+    quality_min_theoretical_r=1.5,
+    quality_max_spread_pct=0.0010,
+)
+
+
+def parse_filter_profile(raw: str | None) -> str:
+    key = (raw or "strict").strip().lower().replace("-", "_")
+    if key in {"strict", "default", "fortress", "normal"}:
+        return "strict"
+    if key in {"relaxed", "flojo", "loose", "paper_relaxed", "more_trades"}:
+        return "relaxed"
+    raise ValueError(
+        f"CRYPTO_NIGHT_FILTER_PROFILE invalido: {raw!r} (strict | relaxed)"
+    )
+
+
+def filters_for_profile(profile: str) -> CryptoNightFilters:
+    return RELAXED if profile == "relaxed" else STRICT

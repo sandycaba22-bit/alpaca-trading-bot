@@ -12,6 +12,11 @@ from bot.config import PROJECT_ROOT, ValidationError
 from bot.security.sanitize import sanitize_api_base_url, sanitize_telegram_chat_id, sanitize_telegram_token
 from bot.security.secrets import register_secret
 from strategies.crypto_night.bias import parse_bias_mode
+from strategies.crypto_night.filter_profile import (
+    CryptoNightFilters,
+    filters_for_profile,
+    parse_filter_profile,
+)
 from strategies.crypto_night.variants import SweepVariant, parse_sweep_variant
 
 
@@ -34,6 +39,8 @@ class CryptoNightSettings:
     client_order_prefix: str
     max_positions: int
     bias_mode: str
+    filter_profile: str
+    filters: CryptoNightFilters
 
 
 def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSettings:
@@ -67,6 +74,11 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         bias_mode = parse_bias_mode(os.getenv("CRYPTO_NIGHT_BIAS_MODE", "4h_1d"))
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
+    try:
+        filter_profile = parse_filter_profile(os.getenv("CRYPTO_NIGHT_FILTER_PROFILE", "strict"))
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    filters = filters_for_profile(filter_profile)
 
     tg_token = sanitize_telegram_token(os.getenv("TELEGRAM_BOT_TOKEN"))
     tg_chat = sanitize_telegram_chat_id(os.getenv("TELEGRAM_CHAT_ID"))
@@ -91,4 +103,6 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         client_order_prefix=(os.getenv("CLIENT_ORDER_PREFIX") or "CN-").strip()[:8],
         max_positions=int(os.getenv("MAX_POSITIONS", "1")),
         bias_mode=bias_mode,
+        filter_profile=filter_profile,
+        filters=filters,
     )

@@ -12,9 +12,10 @@ def score_setup(
     atr_pct: float | None,
     mode_min: int = 5,
     min_theoretical_r: float = 1.8,
+    max_spread_pct: float = 0.0005,
     fee_slip_r: float = 0.15,
 ) -> QualityScore:
-    spread_ok = spread_pct is not None and spread_pct <= 0.0005
+    spread_ok = spread_pct is not None and spread_pct <= max_spread_pct
     sweep_ok = True
     # ATR% ya pasó candado vol (percentil 30–70 en 1H); aquí solo exigimos dato válido.
     atr_ok = atr_pct is not None and atr_pct > 0

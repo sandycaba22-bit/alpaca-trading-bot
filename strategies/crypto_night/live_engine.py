@@ -144,7 +144,13 @@ class CryptoNightEngine:
             if bars_15m.empty or bars_1h.empty:
                 continue
             ts = bars_15m.index[-1]
-            vgate, atr_now, _ = volatility_gate(bars_1h, ts)
+            flt = self.settings.filters
+            vgate, atr_now, _ = volatility_gate(
+                bars_1h,
+                ts,
+                pct_low=flt.vol_pct_low,
+                pct_high=flt.vol_pct_high,
+            )
             if not vgate.ok:
                 logger.info("%s | candado vol | %s", symbol, vgate.detail)
                 continue
@@ -154,6 +160,9 @@ class CryptoNightEngine:
                 symbol,
                 btc_bias=btc_bias,
                 bias_mode=self.settings.bias_mode,
+                swing_lookback_4h=flt.bias_swing_lookback_4h,
+                swing_lookback_1d=flt.bias_swing_lookback_1d,
+                relaxed_structure=flt.bias_relaxed_structure,
             )
             if not bgate.ok or bias is None:
                 logger.info("%s | candado bias | %s", symbol, bgate.detail)
@@ -170,6 +179,8 @@ class CryptoNightEngine:
                 at_ts=ts,
                 bias=bias,
                 vol_ma=vol_ma,
+                min_volume_ratio=flt.setup_min_volume_ratio,
+                v1_max_bars_scan=flt.setup_v1_max_bars,
             )
             if setup is None:
                 continue
@@ -184,7 +195,14 @@ class CryptoNightEngine:
                 return
             tape = self.market.get_live_tape(symbol)
             spread = tape.spread_pct if tape else None
-            q = score_setup(setup, spread_pct=spread, atr_pct=atr_now, mode_min=4)
+            q = score_setup(
+                setup,
+                spread_pct=spread,
+                atr_pct=atr_now,
+                mode_min=flt.quality_min_score,
+                min_theoretical_r=flt.quality_min_theoretical_r,
+                max_spread_pct=flt.quality_max_spread_pct,
+            )
             if not q.ok:
                 logger.info("%s | candado calidad | score=%s", symbol, q.total)
                 continue
@@ -513,14 +531,22 @@ class CryptoNightEngine:
             self.settings.paper,
             self.settings.dry_run,
         )
+        flt = self.settings.filters
         bias_label = "4H+1D" if self.settings.bias_mode == "4h_1d" else "4H only"
+        if flt.bias_relaxed_structure:
+            bias_label = f"{bias_label} (estructura floja)"
         logger.info(
-            "Candados activos | (1) sesion US off→open ET | (2) ATR%% 1H p30-70 | "
-            "(3) bias %s | (4) setup variante %s | (5) score>=%s/5 R net>=1.8 | "
-            "riesgo: %.2f%%/trade max %s/noche kill -1%% noche -3%% semana",
+            "Candados activos | perfil=%s | (1) sesion US off→open ET | "
+            "(2) ATR%% 1H p%.0f-%.0f | (3) bias %s | (4) setup %s vol>=%.1fx | "
+            "(5) score>=%s/5 R net>=%.1f | riesgo: %.2f%%/trade max %s/noche",
+            self.settings.filter_profile,
+            flt.vol_pct_low,
+            flt.vol_pct_high,
             bias_label,
             self.settings.sweep_variant.value,
-            4,
+            flt.setup_min_volume_ratio,
+            flt.quality_min_score,
+            flt.quality_min_theoretical_r,
             self.limits.risk_normal_pct * 100,
             self.limits.max_trades_night,
         )

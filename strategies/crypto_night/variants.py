@@ -34,6 +34,8 @@ def _reclaim_pattern(
     level: float,
     side: TradeSide,
     vol_ma: pd.Series,
+    *,
+    min_volume_ratio: float = 1.5,
 ) -> SweepSetup | None:
     if i < 2 or i >= len(bars_15m):
         return None
@@ -43,7 +45,7 @@ def _reclaim_pattern(
     vol = float(row.volume or 0)
     vma = float(vol_ma.iloc[i]) if i < len(vol_ma) and vol_ma.iloc[i] > 0 else 0.0
     vol_ratio = vol / vma if vma > 0 else 0.0
-    if vol_ratio < 1.5:
+    if vol_ratio < min_volume_ratio:
         return None
     if side == TradeSide.LONG:
         swept = float(prev.low) < level and l < level
@@ -80,6 +82,9 @@ def find_v1_session_sweep(
     session_start: pd.Timestamp,
     bias: NightBias,
     vol_ma: pd.Series,
+    *,
+    min_volume_ratio: float = 1.5,
+    max_bars_scan: int = 3,
 ) -> SweepSetup | None:
     window = bars_15m.loc[bars_15m.index >= session_start]
     if len(window) < 5:
@@ -88,13 +93,21 @@ def find_v1_session_sweep(
         level = float(window["low"].astype(float).min())
     else:
         level = float(window["high"].astype(float).max())
+    cap = max(2, int(max_bars_scan))
     for j in range(2, len(window)):
-        setup = _reclaim_pattern(window, j, level, bias.side, vol_ma.loc[window.index])
+        setup = _reclaim_pattern(
+            window,
+            j,
+            level,
+            bias.side,
+            vol_ma.loc[window.index],
+            min_volume_ratio=min_volume_ratio,
+        )
         if setup:
             setup.symbol = bias.symbol
             setup.variant = "V1"
             return setup
-        if j >= 3:
+        if j >= cap:
             break
     return None
 
@@ -208,10 +221,19 @@ def find_setup_for_variant(
     at_ts: pd.Timestamp,
     bias: NightBias,
     vol_ma: pd.Series,
+    min_volume_ratio: float = 1.5,
+    v1_max_bars_scan: int = 3,
 ) -> SweepSetup | None:
     v = SweepVariant.CHAMPION if variant == SweepVariant.CHAMPION else variant
     if v == SweepVariant.V1:
-        return find_v1_session_sweep(bars_15m, session_start, bias, vol_ma)
+        return find_v1_session_sweep(
+            bars_15m,
+            session_start,
+            bias,
+            vol_ma,
+            min_volume_ratio=min_volume_ratio,
+            max_bars_scan=v1_max_bars_scan,
+        )
     if v == SweepVariant.V2:
         return find_v2_equal_levels(bars_15m, at_ts, bias, vol_ma)
     if v == SweepVariant.V3:
