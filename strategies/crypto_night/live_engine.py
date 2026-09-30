@@ -765,7 +765,7 @@ class CryptoNightEngine:
         logger.info(
             "Candados activos | perfil=%s%s | (1) sesion %s | "
             "(2) ATR%% 1H p%.0f-%.0f | (3) bias %s | (4) setup %s vol>=%.1fx%s | "
-            "(5) score>=%s/5 R net>=%.1f | riesgo: %.2f%%/trade | TP asim 1:%.1f | %s | %s | %s",
+            "(5) score>=%s/5 R net>=%.1f | riesgo: %.2f%%/trade | TP asim 1:%.1f | %s | %s",
             self.settings.filter_profile,
             delay_note,
             session_note,
