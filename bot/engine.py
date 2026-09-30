@@ -29,6 +29,7 @@ from bot.market.mode import is_symbol_tradable, resolve_trading_mode, trading_mo
 from bot.notify.telegram import TelegramNotifier, make_event_id
 from bot.reporting.pnl import PerformanceReporter, PnLEvent, compute_pnl
 from bot.risk.manager import RiskManager
+from bot.risk.rr_take_profit import enforce_vol2x_protective
 from bot.risk.stops import ExitReason
 from bot.scheduler.multi_tf import MultiTimeframeEngine
 from bot.security.audit import audit
@@ -213,8 +214,39 @@ class TradingEngine:
         _ = symbol
         return self.settings.stock_asymmetric_exits_enabled
 
-    def _no_fixed_take_profit(self, symbol: str) -> bool:
-        return self._stock_asymmetric_exits(symbol)
+    def _apply_vol2x_protective(
+        self,
+        symbol: str,
+        side: str,
+        reason: str,
+        entry_price: float,
+        qty: float,
+        stop_price: float | None,
+        take_profit_price: float | None,
+        stop_pct: float | None,
+        take_profit_pct: float | None,
+    ) -> tuple[float, float, float, float]:
+        sp, tp, st, tpp = enforce_vol2x_protective(
+            symbol=symbol,
+            side=side,
+            reason=reason,
+            entry_price=float(entry_price),
+            qty=qty,
+            stop_price=stop_price,
+            take_profit_price=take_profit_price,
+            stop_pct=stop_pct,
+            take_profit_pct=take_profit_pct,
+        )
+        if tp > 0 and "vol_2x" in (reason or "").lower():
+            logger.debug(
+                "%s | vol_2x TP 1:2 | entry=%.4f SL=%.4f TP=%.4f (+%.2f%%)",
+                symbol,
+                entry_price,
+                sp,
+                tp,
+                tpp * 100,
+            )
+        return sp, tp, st, tpp
 
     def _buy_entry_reason(self, symbol: str, entry_strategy: str | None = None) -> str:
         if entry_strategy:
@@ -363,6 +395,10 @@ class TradingEngine:
                     ",".join(self.settings.stock_top50_elite_excluded),
                 )
             if self.settings.stock_asymmetric_exits_enabled:
+                logger.info(
+                    "Acciones vol_2x TP | entradas Motivo vol_2x → TP obligatorio 1:2 desde SL "
+                    "(libro/Telegram; trailing ATR sigue activo)"
+                )
                 logger.info(
                     "Acciones asimétrico | LIVE ON | SL=%.2fx ATR | TP=%s | trail=%.2fx ATR "
                     "| breakeven max(%.2f%%, %.2fx ATR)",
@@ -1828,8 +1864,21 @@ class TradingEngine:
             )
             audit("signal_buy", "allow", symbol=symbol, qty=decision.qty)
             entry_reason = self._buy_entry_reason(symbol, entry_strategy)
-            tp_price = 0.0 if self._no_fixed_take_profit(symbol) else levels.take_profit_price
-            tp_pct = 0.0 if self._no_fixed_take_profit(symbol) else levels.take_profit_pct
+            tp_price = levels.take_profit_price
+            tp_pct = levels.take_profit_pct
+            sl_price = levels.stop_price
+            sl_pct = levels.stop_pct
+            sl_price, tp_price, sl_pct, tp_pct = self._apply_vol2x_protective(
+                symbol,
+                "buy",
+                entry_reason,
+                last_price,
+                decision.qty,
+                sl_price,
+                tp_price,
+                sl_pct,
+                tp_pct,
+            )
             buy_event_id = self._event_id(symbol, "open", entry_reason)
             result = self._submit_order(
                 symbol,
@@ -1837,9 +1886,9 @@ class TradingEngine:
                 OrderSide.BUY,
                 price=last_price,
                 reason=entry_reason,
-                stop_price=levels.stop_price,
+                stop_price=sl_price,
                 take_profit_price=tp_price,
-                stop_pct=levels.stop_pct,
+                stop_pct=sl_pct,
                 take_profit_pct=tp_pct,
                 bid=bid,
                 ask=ask,
@@ -1860,9 +1909,9 @@ class TradingEngine:
                         attempts=1,
                         first_at=time.monotonic(),
                         last_error=result.broker_detail,
-                        stop_price=levels.stop_price,
+                        stop_price=sl_price,
                         take_profit_price=tp_price,
-                        stop_pct=levels.stop_pct,
+                        stop_pct=sl_pct,
                         take_profit_pct=tp_pct,
                         signal_price=last_price,
                         event_id=buy_event_id,
@@ -1880,9 +1929,9 @@ class TradingEngine:
                     event_id=buy_event_id,
                     entry_price=last_price,
                     signal_price=last_price,
-                    stop_price=levels.stop_price,
+                    stop_price=sl_price,
                     take_profit_price=tp_price,
-                    stop_pct=levels.stop_pct,
+                    stop_pct=sl_pct,
                     take_profit_pct=tp_pct,
                 )
                 return
@@ -1900,10 +1949,10 @@ class TradingEngine:
                 last_price,
                 entry_reason,
                 self.executor.dry_run,
-                stop_price=levels.stop_price,
-                take_profit_price=levels.take_profit_price,
-                stop_pct=levels.stop_pct,
-                take_profit_pct=levels.take_profit_pct,
+                stop_price=sl_price,
+                take_profit_price=tp_price,
+                stop_pct=sl_pct,
+                take_profit_pct=tp_pct,
                 event_id=buy_event_id,
             )
             self._on_buy_filled(symbol, atr_value)
@@ -2033,6 +2082,17 @@ class TradingEngine:
             f"{levels.trailing_offset:.4f}" if levels.trailing_offset else "pct_fallback",
         )
         entry_reason = self._buy_entry_reason(symbol, entry_strategy)
+        sl_p, tp_p, sl_pc, tp_pc = self._apply_vol2x_protective(
+            symbol,
+            "buy",
+            entry_reason,
+            last_price,
+            decision.qty,
+            levels.stop_price,
+            levels.take_profit_price,
+            levels.stop_pct,
+            levels.take_profit_pct,
+        )
         self._queue_execution(
             PendingExecution(
                 symbol=symbol,
@@ -2042,10 +2102,10 @@ class TradingEngine:
                 last_price=last_price,
                 is_close=False,
                 last_error=flow_reason,
-                stop_price=levels.stop_price,
-                take_profit_price=levels.take_profit_price,
-                stop_pct=levels.stop_pct,
-                take_profit_pct=levels.take_profit_pct,
+                stop_price=sl_p,
+                take_profit_price=tp_p,
+                stop_pct=sl_pc,
+                take_profit_pct=tp_pc,
                 signal_price=last_price,
                 event_id=self._event_id(symbol, "open", entry_reason),
             )

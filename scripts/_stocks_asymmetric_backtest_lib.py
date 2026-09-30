@@ -458,7 +458,22 @@ def simulate_trades(
         levels = policy.levels(entry, qty, entry, atr)
         sl = levels.stop_price
         tp = levels.take_profit_price
-        if policy.atr_tp_mult >= 50 and policy.min_tp_pct <= 0:
+        use_rr = settings.bot_profile in {"stocks", "stocks_top50"} and (
+            settings.stock_asymmetric_exits_enabled or float(settings.stock_entry_signal_volume_mult or 0) >= 2.0
+        )
+        if use_rr:
+            try:
+                from bot.risk.rr_take_profit import compute_rr_take_profit
+
+                tp, _ = compute_rr_take_profit(
+                    entry_price=entry,
+                    stop_price=sl,
+                    qty=qty,
+                    symbol=symbol,
+                )
+            except Exception:
+                tp = levels.take_profit_price
+        elif policy.atr_tp_mult >= 50 and policy.min_tp_pct <= 0:
             tp = 0.0
         elif tp <= entry:
             tp = 0.0

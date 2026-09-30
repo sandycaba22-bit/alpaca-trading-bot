@@ -564,6 +564,20 @@ class OrderExecutor:
         )
 
         last_price = float(price or 0.0)
+        if side is OrderSide.BUY and last_price > 0:
+            from bot.risk.rr_take_profit import enforce_vol2x_protective
+
+            stop_price, take_profit_price, stop_pct, take_profit_pct = enforce_vol2x_protective(
+                symbol=symbol,
+                side="buy",
+                reason=reason,
+                entry_price=last_price,
+                qty=qty,
+                stop_price=stop_price,
+                take_profit_price=take_profit_price,
+                stop_pct=stop_pct,
+                take_profit_pct=take_profit_pct,
+            )
         use_limit = False
         limit_price: float | None = None
         wide_spread_market = False
@@ -628,6 +642,10 @@ class OrderExecutor:
             "type": order_type,
             "time_in_force": tif.value,
         }
+        if side is OrderSide.BUY and float(stop_price or 0) > 0:
+            payload["stop_price"] = float(stop_price)
+        if side is OrderSide.BUY and float(take_profit_price or 0) > 0:
+            payload["take_profit"] = float(take_profit_price)
         if use_limit:
             payload["limit_price"] = limit_price
 
