@@ -358,9 +358,16 @@ class TradingEngine:
                 )
             if self.settings.stock_asymmetric_exits_enabled:
                 logger.info(
-                    "Acciones asimétrico | LIVE ON | SL=%.2fx ATR | trail=%.2fx ATR "
-                    "| breakeven max(%.2f%%, %.2fx ATR) | SIN TP fijo %%",
+                    "Acciones asimétrico | LIVE ON | SL=%.2fx ATR | TP=%s | trail=%.2fx ATR "
+                    "| breakeven max(%.2f%%, %.2fx ATR)",
                     self.settings.stock_asymmetric_sl_atr_mult,
+                    (
+                        f"{self.settings.stock_asymmetric_tp_atr_mult:.2f}x ATR "
+                        f"(max {self.settings.stock_asymmetric_tp_max_pct * 100:.1f}%%, "
+                        f"~{self.settings.stock_asymmetric_tp_atr_mult / max(self.settings.stock_asymmetric_sl_atr_mult, 0.01):.1f}R vs SL)"
+                        if self.settings.stock_asymmetric_tp_atr_mult > 0
+                        else "OFF (solo trail)"
+                    ),
                     self.settings.stock_asymmetric_trail_atr_mult,
                     self.settings.breakeven_activate_pct * 100,
                     self.settings.breakeven_activate_atr_mult,

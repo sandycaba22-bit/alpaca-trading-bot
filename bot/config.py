@@ -156,6 +156,10 @@ class Settings:
     stock_asymmetric_exits_enabled: bool = False
     stock_asymmetric_sl_atr_mult: float = 1.2
     stock_asymmetric_trail_atr_mult: float = 2.75
+    # TP por ATR en asimétrico (0 = sin TP, dejar correr solo trail). ~4.2x ATR ≈ 3.5R vs SL 1.2x.
+    stock_asymmetric_tp_atr_mult: float = 0.0
+    stock_asymmetric_tp_max_pct: float = 0.14
+    stock_asymmetric_tp_min_pct: float = 0.008
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
     stock_trade_best_only: bool = False
     stock_entry_score_min: float = 44.0
@@ -866,6 +870,27 @@ def load_settings(env_path: Path | None = None) -> Settings:
             min_value=1.5,
             max_value=6.0,
             name="STOCK_ASYMMETRIC_TRAIL_ATR_MULT",
+        ),
+        stock_asymmetric_tp_atr_mult=bounded_float(
+            os.getenv("STOCK_ASYMMETRIC_TP_ATR_MULT"),
+            0.0,
+            min_value=0.0,
+            max_value=12.0,
+            name="STOCK_ASYMMETRIC_TP_ATR_MULT",
+        ),
+        stock_asymmetric_tp_max_pct=bounded_float(
+            os.getenv("STOCK_ASYMMETRIC_TP_MAX_PCT"),
+            0.14,
+            min_value=0.01,
+            max_value=0.35,
+            name="STOCK_ASYMMETRIC_TP_MAX_PCT",
+        ),
+        stock_asymmetric_tp_min_pct=bounded_float(
+            os.getenv("STOCK_ASYMMETRIC_TP_MIN_PCT"),
+            0.008,
+            min_value=0.0,
+            max_value=0.08,
+            name="STOCK_ASYMMETRIC_TP_MIN_PCT",
         ),
         stock_trade_best_only=_as_bool(
             os.getenv("STOCK_TRADE_BEST_ONLY"),

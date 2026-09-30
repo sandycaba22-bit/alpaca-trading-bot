@@ -111,25 +111,39 @@ def policy_asymmetric(
     settings: Settings,
     *,
     breakeven_buffer_atr_mult: float | None = None,
+    tp_atr_mult: float | None = None,
 ) -> StopTakeProfitPolicy:
     buf_atr = (
         settings.breakeven_buffer_atr_mult
         if breakeven_buffer_atr_mult is None
         else float(breakeven_buffer_atr_mult)
     )
+    tp_mult = (
+        float(tp_atr_mult)
+        if tp_atr_mult is not None
+        else float(settings.stock_asymmetric_tp_atr_mult)
+    )
+    if tp_mult > 0:
+        atr_tp = tp_mult
+        max_tp = float(settings.stock_asymmetric_tp_max_pct)
+        min_tp = float(settings.stock_asymmetric_tp_min_pct)
+    else:
+        atr_tp = 99.0
+        max_tp = 99.0
+        min_tp = 0.0
     return StopTakeProfitPolicy(
         stop_loss_pct=settings.stop_loss_pct,
         take_profit_pct=settings.take_profit_pct,
         atr_stop_mult=settings.atr_stop_mult,
         atr_sl_mult=settings.stock_asymmetric_sl_atr_mult,
-        atr_tp_mult=99.0,
-        max_tp_pct=99.0,
+        atr_tp_mult=atr_tp,
+        max_tp_pct=max_tp,
         atr_trailing_mult=settings.stock_asymmetric_trail_atr_mult,
         breakeven_activate_pct=settings.breakeven_activate_pct,
         breakeven_activate_atr_mult=settings.breakeven_activate_atr_mult,
         breakeven_buffer=settings.breakeven_buffer,
         breakeven_buffer_atr_mult=buf_atr,
-        min_tp_pct=0.0,
+        min_tp_pct=min_tp,
         min_stop_pct=settings.stock_min_stop_pct,
         use_breakeven_lock=True,
     )
@@ -443,8 +457,10 @@ def simulate_trades(
             continue
         levels = policy.levels(entry, qty, entry, atr)
         sl = levels.stop_price
-        tp = levels.take_profit_price if policy.min_tp_pct > 0 else 0.0
-        if policy.min_tp_pct <= 0 and policy.atr_tp_mult >= 50:
+        tp = levels.take_profit_price
+        if policy.atr_tp_mult >= 50 and policy.min_tp_pct <= 0:
+            tp = 0.0
+        elif tp <= entry:
             tp = 0.0
         peak = entry
         exit_px = None

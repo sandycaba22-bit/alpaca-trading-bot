@@ -74,19 +74,28 @@ class RiskManager:
                     min_tp_pct=settings.min_tp_pct,
                 )
             if settings.stock_asymmetric_exits_enabled:
+                tp_atr = float(settings.stock_asymmetric_tp_atr_mult)
+                if tp_atr > 0:
+                    atr_tp_mult = tp_atr
+                    max_tp_pct = float(settings.stock_asymmetric_tp_max_pct)
+                    min_tp_pct = float(settings.stock_asymmetric_tp_min_pct)
+                else:
+                    atr_tp_mult = 99.0
+                    max_tp_pct = 99.0
+                    min_tp_pct = 0.0
                 return StopTakeProfitPolicy(
                     stop_loss_pct=policy.stop_loss_pct,
                     take_profit_pct=policy.take_profit_pct,
                     atr_stop_mult=policy.atr_stop_mult,
                     atr_sl_mult=settings.stock_asymmetric_sl_atr_mult,
-                    atr_tp_mult=99.0,
-                    max_tp_pct=99.0,
+                    atr_tp_mult=atr_tp_mult,
+                    max_tp_pct=max_tp_pct,
                     atr_trailing_mult=settings.stock_asymmetric_trail_atr_mult,
                     breakeven_activate_pct=settings.breakeven_activate_pct,
                     breakeven_activate_atr_mult=settings.breakeven_activate_atr_mult,
                     breakeven_buffer=settings.breakeven_buffer,
                     breakeven_buffer_atr_mult=settings.breakeven_buffer_atr_mult,
-                    min_tp_pct=0.0,
+                    min_tp_pct=min_tp_pct,
                     min_stop_pct=settings.stock_min_stop_pct,
                 )
             return StopTakeProfitPolicy(

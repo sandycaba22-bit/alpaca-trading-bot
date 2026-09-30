@@ -10,7 +10,7 @@ Bot secundario Top 50: `.env.stocks_top50` + PM2 `:3001` (paper). Ver `deploy/DE
 | Entrada | Multi-régimen 5Min + confirmación 15Min |
 | SMA lenta | 50 |
 | Filtro | `STOCK_ENTRY_VOL_MULT=2.0` (vela señal ≥ 2× media 20) |
-| Salidas | `STOCK_ASYMMETRIC_*` SL 1.2× ATR, trail 2.75× ATR, sin TP % |
+| Salidas | SL 1.2× ATR, trail 2.75× ATR, **TP 4.2× ATR** (~3.5R) — ver `deploy/STOCK_TP_ATR.md` |
 | Motivo Telegram | `vol_2x` |
 
 Requiere **`SYNC_ENTRY_ENABLED=false`** en `.env.stocks` (sync_entry es otro pipeline).
@@ -29,7 +29,7 @@ SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY
 2. Copiar/merge desde `deploy/stocks.env.example` (no ejecutar `generate_split_env.py` si ya tienes keys live editadas).  
 3. `pm2 restart trading-bot-stocks trading-web-stocks --update-env`  
 4. Verificar log arranque: líneas `Acciones entrada vol_2x` y `Acciones asimétrico | LIVE ON`.  
-5. Compras: Telegram **Motivo: vol_2x**, SL/trail ATR sin TP fijo %.
+5. Compras: Telegram **Motivo: vol_2x**, SL/trail + TP ATR si `STOCK_ASYMMETRIC_TP_ATR_MULT>0`.
 
 ### Universo élite (actual)
 
@@ -46,7 +46,7 @@ Restart: `pm2 restart trading-bot-stocks trading-web-stocks --update-env`
 
 **Paper / VPS ~$100k** (élite + Top 50 misma cuenta paper): `POSITION_SIZE_PCT=0.04`, `MAX_NOTIONAL_PER_ORDER=12000`. Top 50: `RISK_PERCENT_PER_TRADE=0.005`. Si el `.env` aún tiene `MAX_NOTIONAL_PER_ORDER=40`, el bot en paper **sube automáticamente** el tope al arrancar (ver `bot/risk/stock_sizing.py`).
 
-Régimen “no perder”: `USE_FIXED_RISK_SIZING=true`, `DAILY_LOSS_LIMIT_PERCENT=0.025` (freno nuevas entradas), `CAPITAL_PROTECTION_ENABLED=true`, `STOCK_CAPITAL_PROTECTION_MAX_LOSS_PCT=0.03`, `STOCK_TRADE_BEST_ONLY=true` (1 entrada/ciclo, mejor score), salidas trail ATR sin TP fijo (dejar correr ganadores). Top 50: `API_DATA_PER_MINUTE=180`.
+Régimen “no perder”: `USE_FIXED_RISK_SIZING=true`, `DAILY_LOSS_LIMIT_PERCENT=0.025` (freno nuevas entradas), `CAPITAL_PROTECTION_ENABLED=true`, `STOCK_CAPITAL_PROTECTION_MAX_LOSS_PCT=0.03`, `STOCK_TRADE_BEST_ONLY=true` (1 entrada/ciclo, mejor score), TP ATR calibrado (sweep `scripts/sweep_stock_tp_atr_vol2x.py`) + trail si no toca TP. Top 50: `API_DATA_PER_MINUTE=180`.
 
 Tras `git pull`: `bash deploy/update-vps.sh` (valida env + reinicia bots acciones).
 
