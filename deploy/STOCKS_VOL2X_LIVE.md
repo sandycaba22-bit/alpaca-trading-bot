@@ -22,7 +22,7 @@ Requiere **`SYNC_ENTRY_ENABLED=false`** en `.env.stocks` (sync_entry es otro pip
 En `.env.stocks`:
 
 ```env
-SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY
+SYMBOLS=SLV,SPY,QQQ,SMH,GLD,IWM
 ```
 
 1. `git pull` en VPS  
@@ -34,7 +34,7 @@ SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY
 ### Universo élite (actual)
 
 ```env
-SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY
+SYMBOLS=SLV,SPY,QQQ,SMH,GLD,IWM
 MAX_SYMBOLS=8
 ```
 
@@ -52,4 +52,4 @@ Tras `git pull`: `bash deploy/update-vps.sh` (valida env + reinicia bots accione
 
 ## Evidencia sweep (OOS)
 
-`logs/vol2x_universe_sweep.csv` — corrida 335031. Candidatos OOS: SLV, TSLA, NVDA, GOOGL, META (+ AAPL, MSFT, XOM; XOM no incluido en este rollout).
+`logs/vol2x_universe_sweep.csv` — corrida 335031. Élite OOS: **SLV, SPY, QQQ**; SMH/GLD/IWM por liquidez y beta (sin solape Top 50). Mega-caps en Top 50.

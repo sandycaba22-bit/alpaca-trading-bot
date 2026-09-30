@@ -6,7 +6,7 @@ Objetivo: **probar en paper** con los dos bots en paralelo y, cuando el resultad
 
 | Bot | Archivo env | Cuenta Alpaca | PM2 |
 |-----|-------------|---------------|-----|
-| Élite (6 símbolos vol_2x) | `.env.stocks` | **Paper A** (PK… propia) | `trading-bot-stocks` |
+| Élite (6 ETFs/beta — sin solape Top 50) | `.env.stocks` | **Paper A** (PK… propia) | `trading-bot-stocks` |
 | Top 50 | `.env.stocks_top50` | **Paper B** (PK… distinta) | `trading-bot-stocks-top50` |
 
 **Nunca** uses la misma `APCA_API_KEY_ID` en los dos `.env` si ambos van a operar a la vez.
@@ -16,7 +16,7 @@ Con dos papers separados:
 - Equity, buying power y posiciones **no se pisan**.
 - Cada bot respeta su `MAX_OPEN_POSITIONS` solo sobre **su** cuenta.
 - Puedes tener `MARKET_STREAM_ENABLED=true` en élite y REST en Top 50 **sin** pelear por un solo websocket de la misma cuenta.
-- TSLA/META/NVDA pueden operarse en **ambos** bots a la vez (cuentas distintas) — no hay doble exposición en un solo balance.
+- Élite = SLV, SPY, QQQ, SMH, GLD, IWM; Top 50 = 50 large caps (NVDA, TSLA, …) — **sin tickers repetidos**.
 
 ## Crear la segunda paper en Alpaca
 
@@ -81,9 +81,9 @@ Pasos:
 Los dos bots pueden correr **todo el día de mercado** (09:30–16:00 ET) con la **misma API key** si:
 
 1. **Quita** `STOCK_ENTRY_WINDOW_ET` en `.env.stocks` y `.env.stocks_top50` (o déjalo vacío).
-2. En Top 50: **`STOCK_TOP50_EXCLUDE_ELITE_SYMBOLS=true`** (default) — quita **GOOGL, META, NVDA, TSLA** del universo Top 50; la élite sigue operándolos (+ SLV, SPY).
+2. **`STOCK_TOP50_EXCLUDE_ELITE_SYMBOLS=true`** (default) — por si añades tickers a mano en algún `.env`; con el universo actual **no hay solape**.
 
-Log Top 50: `Top 50 sin solape élite | excluidos (4): ...`
+Log élite: `acciones=SLV,SPY,QQQ,SMH,GLD,IWM`
 
 Verifica:
 

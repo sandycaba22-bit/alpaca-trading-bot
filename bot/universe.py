@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-# Bot principal (live) — vol_2x OOS-validados; sin MSFT, AAPL, QQQ
+# Bot principal (live) — vol_2x; cero solape con TOP50 (mega-caps van solo en Top 50).
+# OOS sweep 335031: SLV/SPY/QQQ positivos; SMH/GLD/IWM = beta alta, liquidez, tendencia limpia.
 ELITE_STOCK_SYMBOLS: tuple[str, ...] = (
     "SLV",
-    "TSLA",
-    "GOOGL",
-    "META",
-    "NVDA",
     "SPY",
+    "QQQ",
+    "SMH",
+    "GLD",
+    "IWM",
 )
 
 # Bot secundario + sweep research — 50 large caps US (Alpaca)

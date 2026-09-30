@@ -71,7 +71,7 @@ def main() -> int:
         f"SCHEDULER_TICK_SECONDS={sched}",
         f"POLL_INTERVAL_SECONDS={poll}",
         "",
-        "SYMBOLS=SLV,TSLA,GOOGL,META,NVDA,SPY",
+        "SYMBOLS=SLV,SPY,QQQ,SMH,GLD,IWM",
         "MAX_SYMBOLS=8",
         "CLOSE_ON_MODE_SWITCH=false",
         "",
