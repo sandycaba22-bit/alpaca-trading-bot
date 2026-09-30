@@ -9,6 +9,9 @@ if [[ ! -f "$ENV" ]]; then
   exit 1
 fi
 
+# Windows CRLF breaks ^KEY= sed/grep on Linux VPS
+sed -i 's/\r$//' "$ENV"
+
 KEYS=(
   BOT_PROFILE
   SWEEP_VARIANT
@@ -41,6 +44,13 @@ CRYPTO_NIGHT_SCALE_AT_1R=false
 MAX_POSITIONS=2
 EOF
 
+CN_COUNT="$(grep -cE '^CRYPTO_NIGHT_[A-Z0-9_]+=' "$ENV" || true)"
+if [[ "$CN_COUNT" -lt 7 ]]; then
+  echo "ERROR: faltan claves CRYPTO_NIGHT_* en $ENV (encontradas: $CN_COUNT, esperadas: 7)."
+  echo "Revisa: tail -20 $ENV"
+  exit 1
+fi
+
 echo "=== Claves crypto night en $ENV ==="
-grep -E '^(BOT_PROFILE|SWEEP_VARIANT|CRYPTO_NIGHT_|MAX_POSITIONS)=' "$ENV" || true
+grep -nE '^(BOT_PROFILE|SWEEP_VARIANT|CRYPTO_NIGHT_|MAX_POSITIONS)=' "$ENV" || true
 echo "OK → pm2 restart crypto-night --update-env"
