@@ -2,7 +2,19 @@
 
 Perfil por defecto: **`CRYPTO_NIGHT_FILTER_PROFILE=relaxed`** + **`CRYPTO_NIGHT_BIAS_MODE=4h_only`**.
 
-## Siempre activo (no tocar en paper)
+## Modo 24/7 (recomendado si quieres sábado/domingo sin pausa)
+
+```env
+CRYPTO_NIGHT_SESSION_MODE=always
+CRYPTO_NIGHT_RISK_LIMITS=false
+CRYPTO_NIGHT_MAX_TRADES_PER_NIGHT=0
+```
+
+- Opera **día y noche** (sin apagar viernes noche / domingo).
+- **No** cierra todo a las 09:30 ET.
+- Sin tope automático de trades/noche ni kill −1%/−3% (sigue el archivo kill switch manual).
+
+## Modo noche clásico (`CRYPTO_NIGHT_SESSION_MODE=night`)
 
 - Stop broker al fill, salidas 50% @1R, trail, time 3h
 - Cierre total **09:30 ET**

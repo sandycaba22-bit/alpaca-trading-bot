@@ -57,7 +57,10 @@ class CryptoNightEngine:
             prefix=settings.telegram_prefix,
         )
         self.risk = NightRiskState()
-        self.limits = RiskLimits()
+        self.limits = RiskLimits(
+            limits_enabled=settings.risk_limits_enabled,
+            max_trades_night=settings.max_trades_per_night,
+        )
         self._shutdown = False
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         self._state_path = settings.data_dir / "crypto_night_state.json"
@@ -204,12 +207,14 @@ class CryptoNightEngine:
         if self._kill_switch_active():
             logger.info("Kill switch crypto_night activo — sin entradas")
             return
-        if not in_night_trading_window(now):
+        sm = self.settings.session_mode
+        if not in_night_trading_window(now, session_mode=sm):
             return
         flt = self.settings.filters
         if not entries_allowed(
             now,
             min_minutes_after_us_close=flt.entry_delay_minutes_after_us_close,
+            session_mode=sm,
         ):
             return
         if self._has_active_trade():
@@ -292,7 +297,7 @@ class CryptoNightEngine:
         if not trades:
             return
         broker_open = set(self._open_crypto_positions())
-        if should_flatten_crypto_positions(now):
+        if should_flatten_crypto_positions(now, session_mode=self.settings.session_mode):
             for trade in trades:
                 if trade.status == "open" and trade.qty_open > 0:
                     self._close_position(trade, trade.qty_open, "us_session_open")
@@ -669,13 +674,28 @@ class CryptoNightEngine:
             else ""
         )
         v2_note = " + fallback V2" if flt.setup_try_v2_fallback else ""
+        session_note = (
+            "24/7 (always)"
+            if self.settings.session_mode in {"always", "24_7", "247", "continuous"}
+            else "US off→open ET"
+        )
+        risk_note = (
+            "sin tope trades/kill auto"
+            if not self.limits.limits_enabled
+            else f"max {self.limits.max_trades_night}/noche kill -1%/-3%"
+        )
+        flat_note = (
+            "sin flat 09:30"
+            if self.settings.session_mode in {"always", "24_7", "247", "continuous"}
+            else "flat 09:30 ET"
+        )
         logger.info(
-            "Candados activos | perfil=%s%s | (1) sesion US off→open ET | "
+            "Candados activos | perfil=%s%s | (1) sesion %s | "
             "(2) ATR%% 1H p%.0f-%.0f | (3) bias %s | (4) setup %s vol>=%.1fx%s | "
-            "(5) score>=%s/5 R net>=%.1f | riesgo: %.2f%%/trade max %s/noche | "
-            "kill -1%%/-3%% flat 09:30 ET",
+            "(5) score>=%s/5 R net>=%.1f | riesgo: %.2f%%/trade | %s | %s",
             self.settings.filter_profile,
             delay_note,
+            session_note,
             flt.vol_pct_low,
             flt.vol_pct_high,
             bias_label,
@@ -685,11 +705,13 @@ class CryptoNightEngine:
             flt.quality_min_score,
             flt.quality_min_theoretical_r,
             self.limits.risk_normal_pct * 100,
-            self.limits.max_trades_night,
+            risk_note,
+            flat_note,
         )
         logger.info(
             "Salidas live | stop broker al fill | 50%% @1R | trail @2R | time 3h | "
-            "flat al abrir US (09:30 ET) | libro %s",
+            "%s | libro %s",
+            flat_note,
             self._trades_path.name,
         )
         while not self._shutdown:

@@ -17,7 +17,15 @@ from strategies.crypto_night.filter_profile import (
     filters_for_profile,
     parse_filter_profile,
 )
+from strategies.crypto_night.session import crypto_session_mode
 from strategies.crypto_night.variants import SweepVariant, parse_sweep_variant
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -41,6 +49,9 @@ class CryptoNightSettings:
     bias_mode: str
     filter_profile: str
     filters: CryptoNightFilters
+    session_mode: str
+    risk_limits_enabled: bool
+    max_trades_per_night: int
 
 
 def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSettings:
@@ -79,6 +90,14 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
     filters = filters_for_profile(filter_profile)
+    session_mode = crypto_session_mode(os.getenv("CRYPTO_NIGHT_SESSION_MODE"))
+    risk_limits_enabled = _env_bool("CRYPTO_NIGHT_RISK_LIMITS", default=True)
+    try:
+        max_trades_per_night = int(os.getenv("CRYPTO_NIGHT_MAX_TRADES_PER_NIGHT", "3"))
+    except ValueError as exc:
+        raise ValidationError("CRYPTO_NIGHT_MAX_TRADES_PER_NIGHT debe ser entero") from exc
+    if max_trades_per_night < 0:
+        raise ValidationError("CRYPTO_NIGHT_MAX_TRADES_PER_NIGHT no puede ser negativo")
 
     tg_token = sanitize_telegram_token(os.getenv("TELEGRAM_BOT_TOKEN"))
     tg_chat = sanitize_telegram_chat_id(os.getenv("TELEGRAM_CHAT_ID"))
@@ -105,4 +124,7 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         bias_mode=bias_mode,
         filter_profile=filter_profile,
         filters=filters,
+        session_mode=session_mode,
+        risk_limits_enabled=risk_limits_enabled,
+        max_trades_per_night=max_trades_per_night,
     )

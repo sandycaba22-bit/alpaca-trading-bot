@@ -27,14 +27,17 @@ class RiskLimits:
     max_trades_night: int = 3
     profit_lock_partial_pct: float = 0.012
     profit_lock_total_pct: float = 0.02
+    limits_enabled: bool = True
 
 
 def can_open_trade(state: NightRiskState, limits: RiskLimits, *, mode: str) -> tuple[bool, str]:
+    if not limits.limits_enabled:
+        return True, "ok"
     if state.week_halted:
         return False, "kill_switch_semana"
     if state.halted:
         return False, state.halt_reason or "halt_noche"
-    if state.trades_tonight >= limits.max_trades_night:
+    if limits.max_trades_night > 0 and state.trades_tonight >= limits.max_trades_night:
         return False, "max_trades_noche"
     if state.night_pnl_pct <= limits.kill_night_pct:
         return False, "kill_noche_-1pct"
@@ -48,6 +51,8 @@ def register_trade_result(state: NightRiskState, limits: RiskLimits, pnl_pct: fl
     state.trades_tonight += 1
     state.night_pnl_pct += pnl_pct
     state.week_pnl_pct += pnl_pct
+    if not limits.limits_enabled:
+        return
     if pnl_pct < 0:
         state.consecutive_losses += 1
     else:

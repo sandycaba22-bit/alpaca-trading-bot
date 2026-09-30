@@ -1,11 +1,23 @@
-"""Candado 1 — sesión US close → open (NY/ET)."""
+"""Candado 1 — sesión US close → open (NY/ET) o 24/7 (`CRYPTO_NIGHT_SESSION_MODE=always`)."""
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
+
+_ALWAYS_MODES = frozenset({"always", "24_7", "247", "continuous"})
+
+
+def crypto_session_mode(raw: str | None = None) -> str:
+    mode = (raw if raw is not None else os.getenv("CRYPTO_NIGHT_SESSION_MODE", "night")).strip().lower()
+    return mode or "night"
+
+
+def crypto_session_is_always(mode: str | None = None) -> bool:
+    return crypto_session_mode(mode) in _ALWAYS_MODES
 
 # Regular US equity session (NYSE)
 US_OPEN = time(9, 30)
@@ -39,8 +51,10 @@ def is_us_regular_session(dt: datetime) -> bool:
     return US_OPEN <= t < US_CLOSE
 
 
-def in_night_trading_window(dt: datetime) -> bool:
+def in_night_trading_window(dt: datetime, *, session_mode: str | None = None) -> bool:
     """Ventana permitida: US close → US open, sin viernes noche ni domingo/lunes pre-open."""
+    if crypto_session_is_always(session_mode):
+        return True
     et = _to_et(dt)
     if is_sunday_night_off(dt):
         return False
@@ -62,8 +76,11 @@ def entries_allowed(
     dt: datetime,
     *,
     min_minutes_after_us_close: int = 0,
+    session_mode: str | None = None,
 ) -> bool:
-    if not in_night_trading_window(dt):
+    if crypto_session_is_always(session_mode):
+        return True
+    if not in_night_trading_window(dt, session_mode=session_mode):
         return False
     et = _to_et(dt)
     if et.weekday() < 5 and et.time() >= ENTRY_CUTOFF and et.time() < US_OPEN:
@@ -83,6 +100,8 @@ def session_label(dt: datetime) -> str:
     return et.strftime("%Y-%m-%d %H:%M ET")
 
 
-def should_flatten_crypto_positions(dt: datetime) -> bool:
+def should_flatten_crypto_positions(dt: datetime, *, session_mode: str | None = None) -> bool:
     """Cierra cripto nocturna al abrir sesión US (no cruzar con acciones)."""
+    if crypto_session_is_always(session_mode):
+        return False
     return is_us_regular_session(dt)

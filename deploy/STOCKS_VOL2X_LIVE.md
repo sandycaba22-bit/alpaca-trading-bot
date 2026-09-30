@@ -46,7 +46,7 @@ Restart: `pm2 restart trading-bot-stocks trading-web-stocks --update-env`
 
 **Paper / VPS ~$100k** (élite + Top 50 misma cuenta paper): `POSITION_SIZE_PCT=0.04`, `MAX_NOTIONAL_PER_ORDER=12000`. Top 50: `RISK_PERCENT_PER_TRADE=0.005`. Si el `.env` aún tiene `MAX_NOTIONAL_PER_ORDER=40`, el bot en paper **sube automáticamente** el tope al arrancar (ver `bot/risk/stock_sizing.py`).
 
-Régimen “no perder”: `USE_FIXED_RISK_SIZING=true`, `DAILY_LOSS_LIMIT_PERCENT=0.025` (freno nuevas entradas), `CAPITAL_PROTECTION_ENABLED=true`, `STOCK_CAPITAL_PROTECTION_MAX_LOSS_PCT=0.03`, `STOCK_TRADE_BEST_ONLY=true` (1 entrada/ciclo, mejor score), TP ATR calibrado (sweep `scripts/sweep_stock_tp_atr_vol2x.py`) + trail si no toca TP. Top 50: `API_DATA_PER_MINUTE=180`.
+Sizing: `USE_FIXED_RISK_SIZING=true`. Sin frenos de entrada (`DAILY_LOSS_LIMIT_PERCENT=0`, `CAPITAL_PROTECTION_ENABLED=false`, `STOCK_TRADE_BEST_ONLY=false`) dentro de `STOCK_ENTRY_WINDOW_ET`. TP ATR + trail: `deploy/STOCK_TP_ATR.md`. Top 50: `API_DATA_PER_MINUTE=180`.
 
 Tras `git pull`: `bash deploy/update-vps.sh` (valida env + reinicia bots acciones).
 

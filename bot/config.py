@@ -894,7 +894,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         stock_trade_best_only=_as_bool(
             os.getenv("STOCK_TRADE_BEST_ONLY"),
-            default=bot_profile in {"stocks", "stocks_top50"},
+            default=False,
         ),
         stock_entry_score_min=_resolve_profile_entry_score_min(
             os.getenv("STOCK_ENTRY_SCORE_MIN"),
@@ -908,7 +908,10 @@ def load_settings(env_path: Path | None = None) -> Settings:
             bot_profile,
             asset_profile="crypto",
         ),
-        capital_protection_enabled=_as_bool(os.getenv("CAPITAL_PROTECTION_ENABLED"), default=True),
+        capital_protection_enabled=_as_bool(
+            os.getenv("CAPITAL_PROTECTION_ENABLED"),
+            default=bot_profile not in {"stocks", "stocks_top50"},
+        ),
         stock_capital_protection_max_loss_pct=bounded_float(
             os.getenv("STOCK_CAPITAL_PROTECTION_MAX_LOSS_PCT"),
             0.03 if bot_profile in {"stocks", "stocks_top50"} else 0.04,
@@ -1173,8 +1176,8 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         daily_loss_limit_pct=bounded_float(
             os.getenv("DAILY_LOSS_LIMIT_PERCENT"),
-            0.025 if bot_profile in {"stocks", "stocks_top50"} else 0.03,
-            min_value=0.005,
+            0.0 if bot_profile in {"stocks", "stocks_top50"} else 0.03,
+            min_value=0.0,
             max_value=0.20,
             name="DAILY_LOSS_LIMIT_PERCENT",
         ),
