@@ -7,7 +7,8 @@ from strategies.crypto_night.filter_profile import filters_for_profile, parse_fi
 def test_parse_relaxed_aliases():
     assert parse_filter_profile("relaxed") == "relaxed"
     assert parse_filter_profile("flojo") == "relaxed"
-    assert parse_filter_profile(None) == "strict"
+    assert parse_filter_profile(None) == "relaxed"
+    assert parse_filter_profile("strict") == "strict"
 
 
 def test_relaxed_filters_looser_than_strict():

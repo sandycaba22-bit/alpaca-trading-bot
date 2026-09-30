@@ -58,7 +58,11 @@ def in_night_trading_window(dt: datetime) -> bool:
     return False
 
 
-def entries_allowed(dt: datetime) -> bool:
+def entries_allowed(
+    dt: datetime,
+    *,
+    min_minutes_after_us_close: int = 0,
+) -> bool:
     if not in_night_trading_window(dt):
         return False
     et = _to_et(dt)
@@ -66,6 +70,11 @@ def entries_allowed(dt: datetime) -> bool:
         return False
     if et.weekday() == 0 and et.time() >= ENTRY_CUTOFF and et.time() < US_OPEN:
         return False
+    delay = max(0, int(min_minutes_after_us_close))
+    if delay > 0 and et.weekday() < 5 and et.time() >= US_CLOSE:
+        close_at = et.replace(hour=US_CLOSE.hour, minute=US_CLOSE.minute, second=0, microsecond=0)
+        if et < close_at + timedelta(minutes=delay):
+            return False
     return True
 
 

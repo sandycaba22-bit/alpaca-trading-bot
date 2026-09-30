@@ -12,8 +12,11 @@ class CryptoNightFilters:
     bias_swing_lookback_4h: int
     bias_swing_lookback_1d: int
     bias_relaxed_structure: bool
+    eth_inherit_btc_bias_only: bool
+    entry_delay_minutes_after_us_close: int
     setup_min_volume_ratio: float
     setup_v1_max_bars: int
+    setup_try_v2_fallback: bool
     quality_min_score: int
     quality_min_theoretical_r: float
     quality_max_spread_pct: float
@@ -25,21 +28,28 @@ STRICT = CryptoNightFilters(
     bias_swing_lookback_4h=6,
     bias_swing_lookback_1d=5,
     bias_relaxed_structure=False,
+    eth_inherit_btc_bias_only=False,
+    entry_delay_minutes_after_us_close=0,
     setup_min_volume_ratio=1.5,
     setup_v1_max_bars=3,
+    setup_try_v2_fallback=False,
     quality_min_score=4,
     quality_min_theoretical_r=1.8,
     quality_max_spread_pct=0.0005,
 )
 
+# Paper: más trades; riesgo acotado (stops, kill, sesión y calidad mínima intactos).
 RELAXED = CryptoNightFilters(
     vol_pct_low=20.0,
     vol_pct_high=80.0,
     bias_swing_lookback_4h=4,
     bias_swing_lookback_1d=4,
     bias_relaxed_structure=True,
+    eth_inherit_btc_bias_only=True,
+    entry_delay_minutes_after_us_close=90,
     setup_min_volume_ratio=1.2,
     setup_v1_max_bars=10,
+    setup_try_v2_fallback=True,
     quality_min_score=3,
     quality_min_theoretical_r=1.5,
     quality_max_spread_pct=0.0010,
@@ -47,7 +57,7 @@ RELAXED = CryptoNightFilters(
 
 
 def parse_filter_profile(raw: str | None) -> str:
-    key = (raw or "strict").strip().lower().replace("-", "_")
+    key = (raw or "relaxed").strip().lower().replace("-", "_")
     if key in {"strict", "default", "fortress", "normal"}:
         return "strict"
     if key in {"relaxed", "flojo", "loose", "paper_relaxed", "more_trades"}:

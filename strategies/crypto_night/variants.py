@@ -118,6 +118,8 @@ def find_v2_equal_levels(
     bias: NightBias,
     vol_ma: pd.Series,
     hours: int = 8,
+    *,
+    min_volume_ratio: float = 1.5,
 ) -> SweepSetup | None:
     start = at_ts - pd.Timedelta(hours=hours)
     window = bars_15m.loc[(bars_15m.index >= start) & (bars_15m.index <= at_ts)]
@@ -132,7 +134,14 @@ def find_v2_equal_levels(
     idx = window.index.get_indexer([at_ts], method="pad")[0]
     if idx < 2:
         return None
-    setup = _reclaim_pattern(window, idx, level, bias.side, vol_ma.loc[window.index])
+    setup = _reclaim_pattern(
+        window,
+        idx,
+        level,
+        bias.side,
+        vol_ma.loc[window.index],
+        min_volume_ratio=min_volume_ratio,
+    )
     if setup:
         setup.symbol = bias.symbol
         setup.variant = "V2"
@@ -235,7 +244,13 @@ def find_setup_for_variant(
             max_bars_scan=v1_max_bars_scan,
         )
     if v == SweepVariant.V2:
-        return find_v2_equal_levels(bars_15m, at_ts, bias, vol_ma)
+        return find_v2_equal_levels(
+            bars_15m,
+            at_ts,
+            bias,
+            vol_ma,
+            min_volume_ratio=min_volume_ratio,
+        )
     if v == SweepVariant.V3:
         return find_v3_prior_day(bars_15m, bars_1d, at_ts, bias, vol_ma)
     if v == SweepVariant.V4:

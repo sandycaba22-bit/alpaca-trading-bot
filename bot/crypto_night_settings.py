@@ -75,7 +75,7 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
     try:
-        filter_profile = parse_filter_profile(os.getenv("CRYPTO_NIGHT_FILTER_PROFILE", "strict"))
+        filter_profile = parse_filter_profile(os.getenv("CRYPTO_NIGHT_FILTER_PROFILE", "relaxed"))
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
     filters = filters_for_profile(filter_profile)

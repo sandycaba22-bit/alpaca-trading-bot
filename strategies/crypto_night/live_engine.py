@@ -30,8 +30,8 @@ from strategies.crypto_night.session import (
     in_night_trading_window,
     should_flatten_crypto_positions,
 )
-from strategies.crypto_night.types import TradeSide
-from strategies.crypto_night.variants import find_setup_for_variant
+from strategies.crypto_night.types import GateResult, NightBias, TradeSide
+from strategies.crypto_night.variants import SweepVariant, find_setup_for_variant
 from strategies.crypto_night.volatility import volatility_gate
 
 logger = logging.getLogger("crypto_night")
@@ -121,6 +121,83 @@ class CryptoNightEngine:
     def _load_bars(self, symbol: str, tf: str, lookback: int) -> pd.DataFrame:
         return self.market.get_bars(symbol, tf, lookback, skip_cache=False)
 
+    def _symbol_scan_order(self) -> tuple[str, ...]:
+        syms = list(self.settings.symbols)
+        syms.sort(key=lambda s: (0 if s.upper().startswith("BTC") else 1, s))
+        return tuple(syms)
+
+    def _resolve_symbol_bias(
+        self,
+        symbol: str,
+        bars_4h: pd.DataFrame,
+        bars_1d: pd.DataFrame,
+        btc_bias: NightBias | None,
+    ) -> tuple[GateResult, NightBias | None]:
+        flt = self.settings.filters
+        if flt.eth_inherit_btc_bias_only and symbol.upper().startswith("ETH"):
+            if btc_bias is None:
+                return (
+                    GateResult(False, detail="ETH espera bias BTC en este ciclo"),
+                    None,
+                )
+            return (
+                GateResult(True),
+                NightBias(side=btc_bias.side, symbol=symbol, reason="hereda BTC"),
+            )
+        return resolve_night_bias(
+            bars_4h,
+            bars_1d,
+            symbol,
+            btc_bias=btc_bias,
+            bias_mode=self.settings.bias_mode,
+            swing_lookback_4h=flt.bias_swing_lookback_4h,
+            swing_lookback_1d=flt.bias_swing_lookback_1d,
+            relaxed_structure=flt.bias_relaxed_structure,
+        )
+
+    def _find_entry_setup(
+        self,
+        variant: SweepVariant,
+        *,
+        symbol: str,
+        bars_15m: pd.DataFrame,
+        bars_1d: pd.DataFrame,
+        session_start: pd.Timestamp,
+        at_ts: pd.Timestamp,
+        bias: NightBias,
+        vol_ma: pd.Series,
+    ):
+        flt = self.settings.filters
+        setup = find_setup_for_variant(
+            variant,
+            bars_15m=bars_15m,
+            bars_1d=bars_1d,
+            session_start=session_start,
+            at_ts=at_ts,
+            bias=bias,
+            vol_ma=vol_ma,
+            min_volume_ratio=flt.setup_min_volume_ratio,
+            v1_max_bars_scan=flt.setup_v1_max_bars,
+        )
+        if setup is not None:
+            return setup
+        if flt.setup_try_v2_fallback and variant == SweepVariant.V1:
+            setup = find_setup_for_variant(
+                SweepVariant.V2,
+                bars_15m=bars_15m,
+                bars_1d=bars_1d,
+                session_start=session_start,
+                at_ts=at_ts,
+                bias=bias,
+                vol_ma=vol_ma,
+                min_volume_ratio=flt.setup_min_volume_ratio,
+                v1_max_bars_scan=flt.setup_v1_max_bars,
+            )
+            if setup is not None:
+                logger.info("%s | setup V1 vacio → uso V2", symbol)
+            return setup
+        return None
+
     def run_once(self) -> None:
         now = datetime.now(timezone.utc)
         self._manage_lifecycle(now)
@@ -129,14 +206,18 @@ class CryptoNightEngine:
             return
         if not in_night_trading_window(now):
             return
-        if not entries_allowed(now):
+        flt = self.settings.filters
+        if not entries_allowed(
+            now,
+            min_minutes_after_us_close=flt.entry_delay_minutes_after_us_close,
+        ):
             return
         if self._has_active_trade():
             return
 
         variant = self.settings.sweep_variant
         btc_bias = None
-        for symbol in self.settings.symbols:
+        for symbol in self._symbol_scan_order():
             bars_15m = self._load_bars(symbol, "15Min", 400)
             bars_1h = self._load_bars(symbol, "1Hour", 600)
             bars_4h = self._load_bars(symbol, "4Hour", 400)
@@ -144,7 +225,6 @@ class CryptoNightEngine:
             if bars_15m.empty or bars_1h.empty:
                 continue
             ts = bars_15m.index[-1]
-            flt = self.settings.filters
             vgate, atr_now, _ = volatility_gate(
                 bars_1h,
                 ts,
@@ -154,38 +234,29 @@ class CryptoNightEngine:
             if not vgate.ok:
                 logger.info("%s | candado vol | %s", symbol, vgate.detail)
                 continue
-            bgate, bias = resolve_night_bias(
-                bars_4h,
-                bars_1d,
-                symbol,
-                btc_bias=btc_bias,
-                bias_mode=self.settings.bias_mode,
-                swing_lookback_4h=flt.bias_swing_lookback_4h,
-                swing_lookback_1d=flt.bias_swing_lookback_1d,
-                relaxed_structure=flt.bias_relaxed_structure,
-            )
+            bgate, bias = self._resolve_symbol_bias(symbol, bars_4h, bars_1d, btc_bias)
             if not bgate.ok or bias is None:
                 logger.info("%s | candado bias | %s", symbol, bgate.detail)
                 continue
-            if symbol.startswith("BTC"):
+            if symbol.upper().startswith("BTC"):
                 btc_bias = bias
             vol_ma = bars_15m["volume"].astype(float).rolling(20).mean()
             session_start = ts - pd.Timedelta(hours=8)
-            setup = find_setup_for_variant(
+            setup = self._find_entry_setup(
                 variant,
+                symbol=symbol,
                 bars_15m=bars_15m,
                 bars_1d=bars_1d,
                 session_start=session_start,
                 at_ts=ts,
                 bias=bias,
                 vol_ma=vol_ma,
-                min_volume_ratio=flt.setup_min_volume_ratio,
-                v1_max_bars_scan=flt.setup_v1_max_bars,
             )
             if setup is None:
+                if flt.setup_try_v2_fallback:
+                    logger.info("%s | candado setup | sin patron V1/V2", symbol)
                 continue
             setup.symbol = symbol
-            setup.variant = variant.value
             if len(bars_1h) > 14:
                 setup.atr_1h = float(
                     bars_1h["close"].astype(float).diff().abs().rolling(14).mean().iloc[-1]
@@ -535,16 +606,27 @@ class CryptoNightEngine:
         bias_label = "4H+1D" if self.settings.bias_mode == "4h_1d" else "4H only"
         if flt.bias_relaxed_structure:
             bias_label = f"{bias_label} (estructura floja)"
+        if flt.eth_inherit_btc_bias_only:
+            bias_label = f"{bias_label} | ETH hereda BTC"
+        delay_note = (
+            f" | entradas desde +{flt.entry_delay_minutes_after_us_close}min post-cierre"
+            if flt.entry_delay_minutes_after_us_close > 0
+            else ""
+        )
+        v2_note = " + fallback V2" if flt.setup_try_v2_fallback else ""
         logger.info(
-            "Candados activos | perfil=%s | (1) sesion US off→open ET | "
-            "(2) ATR%% 1H p%.0f-%.0f | (3) bias %s | (4) setup %s vol>=%.1fx | "
-            "(5) score>=%s/5 R net>=%.1f | riesgo: %.2f%%/trade max %s/noche",
+            "Candados activos | perfil=%s%s | (1) sesion US off→open ET | "
+            "(2) ATR%% 1H p%.0f-%.0f | (3) bias %s | (4) setup %s vol>=%.1fx%s | "
+            "(5) score>=%s/5 R net>=%.1f | riesgo: %.2f%%/trade max %s/noche | "
+            "kill -1%%/-3%% flat 09:30 ET",
             self.settings.filter_profile,
+            delay_note,
             flt.vol_pct_low,
             flt.vol_pct_high,
             bias_label,
             self.settings.sweep_variant.value,
             flt.setup_min_volume_ratio,
+            v2_note,
             flt.quality_min_score,
             flt.quality_min_theoretical_r,
             self.limits.risk_normal_pct * 100,
