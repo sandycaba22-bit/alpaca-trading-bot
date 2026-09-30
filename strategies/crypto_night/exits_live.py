@@ -44,7 +44,22 @@ def stop_hit(trade: NightTradeRecord, last_price: float) -> bool:
     return last_price >= stop
 
 
-def evaluate_exit(trade: NightTradeRecord, last_price: float, now: datetime) -> ExitDecision:
+def take_profit_hit(trade: NightTradeRecord, last_price: float) -> bool:
+    tp = float(trade.take_profit_price or 0.0)
+    if tp <= 0:
+        return False
+    if trade.side == TradeSide.LONG.value:
+        return last_price >= tp
+    return last_price <= tp
+
+
+def evaluate_exit(
+    trade: NightTradeRecord,
+    last_price: float,
+    now: datetime,
+    *,
+    scale_at_1r: bool = False,
+) -> ExitDecision:
     if trade.entry_price is None or trade.qty_open <= 0:
         return ExitDecision("hold")
 
@@ -54,6 +69,13 @@ def evaluate_exit(trade: NightTradeRecord, last_price: float, now: datetime) -> 
 
     r = current_r(trade, last_price)
     best = max(trade.best_r, r)
+
+    if take_profit_hit(trade, last_price):
+        return ExitDecision(
+            "close_all",
+            close_qty=trade.qty_open,
+            reason="take_profit",
+        )
 
     if stop_hit(trade, last_price):
         return ExitDecision(
@@ -83,7 +105,7 @@ def evaluate_exit(trade: NightTradeRecord, last_price: float, now: datetime) -> 
                 reason="time_exit",
             )
 
-    if not trade.partial_taken and r >= 1.0:
+    if scale_at_1r and not trade.partial_taken and r >= 1.0:
         entry = float(trade.entry_price)
         if trade.side == TradeSide.LONG.value:
             new_stop = entry + 0.3 * risk
@@ -98,7 +120,7 @@ def evaluate_exit(trade: NightTradeRecord, last_price: float, now: datetime) -> 
             reason="scale_1r",
         )
 
-    if trade.partial_taken and r >= 2.0:
+    if scale_at_1r and trade.partial_taken and r >= 2.0:
         entry = float(trade.entry_price)
         if trade.side == TradeSide.LONG.value:
             trail = entry + 1.5 * risk

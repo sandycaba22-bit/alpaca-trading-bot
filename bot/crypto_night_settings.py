@@ -52,6 +52,8 @@ class CryptoNightSettings:
     session_mode: str
     risk_limits_enabled: bool
     max_trades_per_night: int
+    tp_reward_risk: float
+    scale_at_1r: bool
 
 
 def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSettings:
@@ -86,14 +88,14 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
     try:
-        filter_profile = parse_filter_profile(os.getenv("CRYPTO_NIGHT_FILTER_PROFILE", "relaxed"))
+        filter_profile = parse_filter_profile(os.getenv("CRYPTO_NIGHT_FILTER_PROFILE", "aggressive"))
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
     filters = filters_for_profile(filter_profile)
     session_mode = crypto_session_mode(os.getenv("CRYPTO_NIGHT_SESSION_MODE"))
-    risk_limits_enabled = _env_bool("CRYPTO_NIGHT_RISK_LIMITS", default=True)
+    risk_limits_enabled = _env_bool("CRYPTO_NIGHT_RISK_LIMITS", default=False)
     try:
-        max_trades_per_night = int(os.getenv("CRYPTO_NIGHT_MAX_TRADES_PER_NIGHT", "3"))
+        max_trades_per_night = int(os.getenv("CRYPTO_NIGHT_MAX_TRADES_PER_NIGHT", "0"))
     except ValueError as exc:
         raise ValidationError("CRYPTO_NIGHT_MAX_TRADES_PER_NIGHT debe ser entero") from exc
     if max_trades_per_night < 0:
@@ -120,7 +122,9 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         poll_seconds=int(os.getenv("POLL_INTERVAL_SECONDS", "60")),
         dry_run=os.getenv("DRY_RUN", "false").strip().lower() in {"1", "true", "yes"},
         client_order_prefix=(os.getenv("CLIENT_ORDER_PREFIX") or "CN-").strip()[:8],
-        max_positions=int(os.getenv("MAX_POSITIONS", "1")),
+        max_positions=int(os.getenv("MAX_POSITIONS", "2")),
+        tp_reward_risk=float(os.getenv("CRYPTO_NIGHT_TP_REWARD_RISK", "2.5")),
+        scale_at_1r=_env_bool("CRYPTO_NIGHT_SCALE_AT_1R", default=False),
         bias_mode=bias_mode,
         filter_profile=filter_profile,
         filters=filters,

@@ -55,17 +55,40 @@ RELAXED = CryptoNightFilters(
     quality_max_spread_pct=0.0010,
 )
 
+# Paper/live alto volumen: vol amplia, vol setup 1.1x, calidad mínima 2/5, sin delay post-cierre.
+AGGRESSIVE = CryptoNightFilters(
+    vol_pct_low=10.0,
+    vol_pct_high=90.0,
+    bias_swing_lookback_4h=3,
+    bias_swing_lookback_1d=3,
+    bias_relaxed_structure=True,
+    eth_inherit_btc_bias_only=True,
+    entry_delay_minutes_after_us_close=0,
+    setup_min_volume_ratio=1.1,
+    setup_v1_max_bars=14,
+    setup_try_v2_fallback=True,
+    quality_min_score=2,
+    quality_min_theoretical_r=1.2,
+    quality_max_spread_pct=0.0015,
+)
+
 
 def parse_filter_profile(raw: str | None) -> str:
-    key = (raw or "relaxed").strip().lower().replace("-", "_")
+    key = (raw or "aggressive").strip().lower().replace("-", "_")
     if key in {"strict", "default", "fortress", "normal"}:
         return "strict"
     if key in {"relaxed", "flojo", "loose", "paper_relaxed", "more_trades"}:
         return "relaxed"
+    if key in {"aggressive", "high_volume", "volume", "paper_aggressive"}:
+        return "aggressive"
     raise ValueError(
-        f"CRYPTO_NIGHT_FILTER_PROFILE invalido: {raw!r} (strict | relaxed)"
+        f"CRYPTO_NIGHT_FILTER_PROFILE invalido: {raw!r} (strict | relaxed | aggressive)"
     )
 
 
 def filters_for_profile(profile: str) -> CryptoNightFilters:
-    return RELAXED if profile == "relaxed" else STRICT
+    if profile == "aggressive":
+        return AGGRESSIVE
+    if profile == "relaxed":
+        return RELAXED
+    return STRICT

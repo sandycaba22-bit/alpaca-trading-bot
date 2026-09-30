@@ -47,13 +47,24 @@ def _simulate_exit(
     setup,
     *,
     max_bars: int = 12,
+    tp_reward_risk: float = 2.5,
+    scale_at_1r: bool = False,
 ) -> tuple[float, str]:
-    """R simplificado: scale 50% @1R, runner trail; time stop 3h (12×15m)."""
+    """Salida: TP fijo tp_reward_risk × R, o legacy scale @1R si scale_at_1r."""
     entry = setup.limit_price
     risk = abs(entry - setup.stop_price)
     if risk <= 0:
         return 0.0, "invalid_risk"
+    from strategies.crypto_night.asymmetric_tp import take_profit_from_stop
+
     side = setup.side
+    side_s = side.value if hasattr(side, "value") else str(side)
+    tp_px = take_profit_from_stop(
+        entry_price=entry,
+        stop_price=setup.stop_price,
+        side=side_s,
+        reward_risk=tp_reward_risk,
+    )
     partial_taken = False
     runner_sl = setup.stop_price
     best_r = 0.0
@@ -62,6 +73,8 @@ def _simulate_exit(
         row = bars_15m.iloc[j]
         hi, lo = float(row.high), float(row.low)
         if side == TradeSide.LONG:
+            if tp_px > 0 and hi >= tp_px:
+                return float(tp_reward_risk) - FEE_SLIP_R, "take_profit"
             if lo <= runner_sl:
                 r = (runner_sl - entry) / risk
                 if partial_taken:
@@ -69,6 +82,8 @@ def _simulate_exit(
                 return r - FEE_SLIP_R, "stop"
             cur_r = (hi - entry) / risk
         else:
+            if tp_px > 0 and lo <= tp_px:
+                return float(tp_reward_risk) - FEE_SLIP_R, "take_profit"
             if hi >= runner_sl:
                 r = (entry - runner_sl) / risk
                 if partial_taken:
@@ -76,10 +91,10 @@ def _simulate_exit(
                 return r - FEE_SLIP_R, "stop"
             cur_r = (entry - lo) / risk
         best_r = max(best_r, cur_r)
-        if not partial_taken and cur_r >= 1.0:
+        if scale_at_1r and not partial_taken and cur_r >= 1.0:
             partial_taken = True
             runner_sl = entry + 0.3 * risk if side == TradeSide.LONG else entry - 0.3 * risk
-        if partial_taken and cur_r >= 2.0:
+        if scale_at_1r and partial_taken and cur_r >= 2.0:
             runner_sl = (
                 entry + 1.5 * risk if side == TradeSide.LONG else entry - 1.5 * risk
             )
@@ -113,13 +128,29 @@ def run_variant_backtest(
     bars_1d: pd.DataFrame,
     oos_start: pd.Timestamp | None = None,
     mode_min_score: int = 4,
+    filters=None,
+    limits: RiskLimits | None = None,
+    tp_reward_risk: float = 2.5,
+    scale_at_1r: bool = False,
+    vol_pct_low: float = 30.0,
+    vol_pct_high: float = 70.0,
+    min_volume_ratio: float = 1.5,
+    min_theoretical_r: float = 1.8,
+    max_spread_pct: float = 0.0005,
 ) -> VariantStats:
     stats = VariantStats(variant=variant.value)
     if bars_15m.empty:
         return stats
     vol_ma = _vol_ma(bars_15m)
     atr_pct_s = atr_percent_series(bars_1h)
-    limits = RiskLimits()
+    if filters is not None:
+        vol_pct_low = filters.vol_pct_low
+        vol_pct_high = filters.vol_pct_high
+        mode_min_score = filters.quality_min_score
+        min_theoretical_r = filters.quality_min_theoretical_r
+        max_spread_pct = filters.quality_max_spread_pct
+        min_volume_ratio = filters.setup_min_volume_ratio
+    limits = limits or RiskLimits(limits_enabled=False, max_trades_night=0)
     state = NightRiskState()
 
     for ts in bars_15m.index:
@@ -130,14 +161,27 @@ def run_variant_backtest(
             continue
         stats.signals += 1
 
-        vgate, atr_now, _ = volatility_gate(bars_1h, ts)
+        vgate, atr_now, _ = volatility_gate(
+            bars_1h, ts, pct_low=vol_pct_low, pct_high=vol_pct_high
+        )
         if not vgate.ok:
             stats.rejections[vgate.reject or RejectReason.VOLATILITY] += 1
             continue
 
         b4 = bars_4h.loc[bars_4h.index <= ts]
         b1 = bars_1d.loc[bars_1d.index <= ts]
-        bgate, bias = resolve_night_bias(b4, b1, symbol)
+        relaxed = filters.bias_relaxed_structure if filters is not None else False
+        lb4 = filters.bias_swing_lookback_4h if filters is not None else 6
+        lb1 = filters.bias_swing_lookback_1d if filters is not None else 5
+        bgate, bias = resolve_night_bias(
+            b4,
+            b1,
+            symbol,
+            bias_mode="4h_only",
+            swing_lookback_4h=lb4,
+            swing_lookback_1d=lb1,
+            relaxed_structure=relaxed,
+        )
         if not bgate.ok or bias is None:
             stats.rejections[RejectReason.BIAS] += 1
             continue
@@ -151,6 +195,7 @@ def run_variant_backtest(
             at_ts=ts,
             bias=bias,
             vol_ma=vol_ma,
+            min_volume_ratio=min_volume_ratio,
         )
         if setup is None:
             stats.rejections[RejectReason.ENTRY] += 1
@@ -166,6 +211,9 @@ def run_variant_backtest(
             spread_pct=spread_pct,
             atr_pct=atr_now,
             mode_min=mode_min_score,
+            min_theoretical_r=min_theoretical_r,
+            max_spread_pct=max_spread_pct,
+            min_volume_ratio=min_volume_ratio,
         )
         if not q.ok:
             stats.rejections[RejectReason.QUALITY] += 1
@@ -181,7 +229,13 @@ def run_variant_backtest(
             continue
 
         idx = bars_15m.index.get_indexer([ts], method="pad")[0]
-        r_net, exit_reason = _simulate_exit(bars_15m, idx, setup)
+        r_net, exit_reason = _simulate_exit(
+            bars_15m,
+            idx,
+            setup,
+            tp_reward_risk=tp_reward_risk,
+            scale_at_1r=scale_at_1r,
+        )
         stats.trades += 1
         stats.r_net_sum += r_net
         stats.r_net_list.append(r_net)

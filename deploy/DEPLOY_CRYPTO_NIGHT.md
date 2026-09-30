@@ -22,7 +22,7 @@ Kill switch solo cripto: `echo '{"halt":true}' > data-crypto-night/crypto_night_
 4. **Setup** — sweep/reclaim `SWEEP_VARIANT` (V1); relaxed: vol ≥1.2× y más barras escaneadas.
 5. **Calidad** — strict: score ≥4/5 y R net ≥1.8; relaxed: ≥3/5 y R net ≥1.5.
 
-Perfil en `.env.crypto_night`: `CRYPTO_NIGHT_FILTER_PROFILE=strict|relaxed` (mismos 5 candados; relaxed = más trades paper, más riesgo).
+Perfil en `.env.crypto_night`: `strict|relaxed|aggressive` (aggressive = más volumen paper + TP asimétrico 2.5R; ver `CRYPTO_NIGHT_AGGRESSIVE_REPORT.md`).
 
 Extra: **riesgo noche** (máx. 3 trades, −1% noche, −3% semana, profit lock +2%), archivo kill switch, `MAX_POSITIONS=1`.
 

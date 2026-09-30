@@ -20,6 +20,8 @@ class NightTradeRecord:
     entry_price: float | None = None
     stop_price: float = 0.0
     runner_stop: float = 0.0
+    take_profit_price: float = 0.0
+    take_profit_order_id: str = ""
     entry_time_utc: str = ""
     partial_taken: bool = False
     best_r: float = 0.0
@@ -53,6 +55,8 @@ def load_trades(path: Path) -> list[NightTradeRecord]:
                     ),
                     stop_price=float(row.get("stop_price", 0)),
                     runner_stop=float(row.get("runner_stop", row.get("stop_price", 0))),
+                    take_profit_price=float(row.get("take_profit_price", 0) or 0),
+                    take_profit_order_id=str(row.get("take_profit_order_id", "")),
                     entry_time_utc=str(row.get("entry_time_utc", "")),
                     partial_taken=bool(row.get("partial_taken", False)),
                     best_r=float(row.get("best_r", 0)),

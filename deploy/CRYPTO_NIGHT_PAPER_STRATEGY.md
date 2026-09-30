@@ -1,6 +1,7 @@
 # Crypto Night — estrategia paper (más trades, riesgo acotado)
 
-Perfil por defecto: **`CRYPTO_NIGHT_FILTER_PROFILE=relaxed`** + **`CRYPTO_NIGHT_BIAS_MODE=4h_only`**.
+Perfil por defecto: **`CRYPTO_NIGHT_FILTER_PROFILE=aggressive`** + **`CRYPTO_NIGHT_BIAS_MODE=4h_only`**.  
+Detalle filtros + TP 1:2.5: **`deploy/CRYPTO_NIGHT_AGGRESSIVE_REPORT.md`**.
 
 ## Modo 24/7 (recomendado si quieres sábado/domingo sin pausa)
 
