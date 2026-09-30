@@ -109,6 +109,25 @@ class TelegramNotifier:
             self._sent_order = [x for x in self._sent_order if x != event_id]
             self._save_sent_ids()
 
+    def _publish_trade_alert(
+        self,
+        kind: str,
+        symbol: str,
+        headline: str,
+        body: str,
+        event_id: str | None = None,
+    ) -> None:
+        from bot.notify.trade_alert_feed import append_trade_alert
+
+        append_trade_alert(
+            source=self._prefix or "BOT",
+            kind=kind,
+            symbol=symbol,
+            headline=headline,
+            body=body,
+            event_id=event_id,
+        )
+
     def _send_event(self, event_id: str | None, text: str) -> bool:
         if not self._claim_event(event_id):
             return False
@@ -147,7 +166,11 @@ class TelegramNotifier:
             lines.append(f"Take Profit: ${take_profit_price:,.4f} (+{tp_txt})")
         if dry_run:
             lines.append("Paper · dry-run (orden no enviada)")
-        return self._send_event(event_id, "\n".join(lines))
+        text = "\n".join(lines)
+        self._publish_trade_alert("open", symbol, lines[0], text, event_id)
+        if not self.enabled:
+            return False
+        return self._send_event(event_id, text)
 
     def notify_partial_close(
         self,
@@ -190,7 +213,11 @@ class TelegramNotifier:
         ]
         if dry_run:
             lines.append("Paper · dry-run (orden no enviada)")
-        return self._send_event(event_id, "\n".join(lines))
+        text = "\n".join(lines)
+        self._publish_trade_alert("partial", symbol, lines[0], text, event_id)
+        if not self.enabled:
+            return False
+        return self._send_event(event_id, text)
 
     def notify_closed(
         self,
@@ -233,7 +260,11 @@ class TelegramNotifier:
             )
         if dry_run:
             lines.append("Paper · dry-run (orden no enviada)")
-        return self._send_event(event_id, "\n".join(lines))
+        text = "\n".join(lines)
+        self._publish_trade_alert("close", symbol, lines[0], text, event_id)
+        if not self.enabled:
+            return False
+        return self._send_event(event_id, text)
 
     def notify_breakeven_locked(
         self,

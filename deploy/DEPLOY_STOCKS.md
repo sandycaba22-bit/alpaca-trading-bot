@@ -29,6 +29,8 @@ Edita keys en `.env.stocks` (live) y `.env.stocks_top50` (paper) antes de operar
 cd ~/alpaca-trading-bot && bash deploy/update-vps.sh
 ```
 
+Tras cambios en el **panel web** (alertas multi-bot): `pm2 restart trading-web-stocks trading-web-stocks-top50 --update-env`
+
 ## Antes de la apertura US
 
 ```bash

@@ -256,6 +256,26 @@ app.get('/api/status', requireLogin, (req, res) => {
     });
 });
 
+app.get('/api/trade-alerts', requireLogin, (req, res) => {
+    const after = Math.max(0, parseInt(String(req.query.after || '0'), 10) || 0);
+    const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '80'), 10) || 80));
+    runPython(
+        [path.join(__dirname, 'trade_alerts.py'), `--after=${after}`, `--limit=${limit}`],
+        8000,
+        (err, stdout) => {
+            if (err) {
+                return res.status(502).json({ error: 'No se pudieron leer alertas' });
+            }
+            try {
+                const data = JSON.parse(stdout || '{}');
+                return res.json(data);
+            } catch {
+                return res.status(502).json({ error: 'Respuesta invalida de alertas' });
+            }
+        }
+    );
+});
+
 app.get('/api/chart', requireLogin, (req, res) => {
     const symbol = String(req.query.symbol || '').toUpperCase();
     const timeframe = String(req.query.timeframe || '15Min');

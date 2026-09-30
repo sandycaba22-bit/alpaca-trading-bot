@@ -305,6 +305,28 @@ class CryptoNightEngine:
             if trade.status != "open" or trade.qty_open <= 0:
                 continue
             if trade.symbol not in broker_open:
+                entry = float(trade.entry_price or 0.0)
+                qty = float(trade.qty_open or trade.qty or 0.0)
+                tape = self.market.get_live_tape(trade.symbol)
+                exit_p = float(tape.last_price) if tape and tape.last_price > 0 else entry
+                if entry > 0 and qty > 0:
+                    if trade.side == TradeSide.LONG.value:
+                        pnl_abs = (exit_p - entry) * qty
+                    else:
+                        pnl_abs = (entry - exit_p) * qty
+                    notional = entry * qty
+                    pnl_pct = (pnl_abs / notional * 100.0) if notional > 0 else 0.0
+                    self.notifier.notify_closed(
+                        trade.symbol,
+                        qty,
+                        entry,
+                        exit_p,
+                        pnl_abs,
+                        pnl_pct,
+                        "broker_stop_or_fill",
+                        self.settings.dry_run,
+                        event_id=f"cn-broker-close|{trade.symbol}|{trade.entry_order_id}",
+                    )
                 trade.status = "closed"
                 trade.qty_open = 0.0
                 logger.info("%s | posicion cerrada en broker (stop/fill)", trade.symbol)
@@ -370,6 +392,17 @@ class CryptoNightEngine:
                 trade.stop_price,
                 trade.stop_order_id,
             )
+            side = "buy" if trade.side == TradeSide.LONG.value else "sell"
+            self.notifier.notify_opened(
+                trade.symbol,
+                side,
+                filled_qty,
+                fill_px,
+                "crypto night fill confirmado",
+                self.settings.dry_run,
+                stop_price=float(trade.stop_price),
+                event_id=f"cn-fill|{trade.symbol}|{trade.entry_order_id}",
+            )
         except Exception as exc:
             logger.warning("%s | stop broker fallo (gestion software): %s", trade.symbol, exc)
         return True
@@ -409,6 +442,29 @@ class CryptoNightEngine:
                 trade.qty_open,
                 trade.runner_stop,
             )
+            entry = float(trade.entry_price or 0.0)
+            if entry > 0:
+                pnl_abs = (
+                    (last_price - entry) * close_qty
+                    if trade.side == TradeSide.LONG.value
+                    else (entry - last_price) * close_qty
+                )
+                notional = entry * close_qty
+                pnl_pct = (pnl_abs / notional * 100.0) if notional > 0 else 0.0
+                self.notifier.notify_partial_close(
+                    trade.symbol,
+                    close_qty,
+                    trade.qty_open,
+                    entry,
+                    last_price,
+                    pnl_abs,
+                    pnl_pct,
+                    decision.reason or "partial_1r",
+                    "filled",
+                    close_qty,
+                    self.settings.dry_run,
+                    event_id=f"cn-partial|{trade.symbol}|{int(time.time())}",
+                )
             return True
         if decision.action == "close_all":
             qty = round(trade.qty_open, 6)
@@ -492,17 +548,16 @@ class CryptoNightEngine:
             pnl_abs = (entry - exit_p) * qty
         notional = entry * qty if entry > 0 else 1.0
         pnl_pct = (pnl_abs / notional) * 100.0
-        if self.notifier.enabled:
-            self.notifier.notify_closed(
-                trade.symbol,
-                qty,
-                entry,
-                exit_p,
-                pnl_abs,
-                pnl_pct,
-                reason,
-                self.settings.dry_run,
-            )
+        self.notifier.notify_closed(
+            trade.symbol,
+            qty,
+            entry,
+            exit_p,
+            pnl_abs,
+            pnl_pct,
+            reason,
+            self.settings.dry_run,
+        )
 
     def _maybe_place_limit(self, symbol: str, setup, bias) -> None:
         from alpaca.trading.enums import OrderSide, TimeInForce
@@ -575,20 +630,20 @@ class CryptoNightEngine:
                 )
             )
             save_trades(self._trades_path, trades)
-            msg = (
-                f"{setup.variant} limit {setup.limit_price:.2f} qty={qty} "
-                f"SL ref {setup.stop_price:.2f} id={cid}"
+            from bot.notify.trade_alert_feed import append_trade_alert
+
+            side_label = "COMPRA" if side.value == "buy" else "VENTA"
+            append_trade_alert(
+                source=self.settings.telegram_prefix or "[CN]",
+                kind="pending",
+                symbol=symbol,
+                headline=f"Orden limite {side_label} {symbol}",
+                body=(
+                    f"Limit @ {setup.limit_price:.4f} qty={qty:g} "
+                    f"SL ref {setup.stop_price:.4f} variant={setup.variant}"
+                ),
+                event_id=f"cn-pending|{symbol}|{cid}",
             )
-            if self.notifier.enabled:
-                self.notifier.notify_opened(
-                    symbol,
-                    side.value,
-                    qty,
-                    setup.limit_price,
-                    msg,
-                    self.settings.dry_run,
-                    stop_price=setup.stop_price,
-                )
             logger.info("%s | orden enviada | broker_id=%s", symbol, oid)
         except Exception as exc:
             logger.warning("%s | orden rechazada | %s", symbol, exc)

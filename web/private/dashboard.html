@@ -33,6 +33,17 @@
             <div id="control-meta" class="control-meta"></div>
         </section>
 
+        <section class="alert-panel" aria-live="polite">
+            <div class="alert-panel__head">
+                <h2>Alertas · todos los bots</h2>
+                <button type="button" id="alert-notify-btn" class="btn btn-ghost btn-sm">Activar avisos en el navegador</button>
+            </div>
+            <p class="muted alert-panel__hint">Compras, ventas, cierres y órdenes (Élite, Top 50, Crypto Night). Telegram sigue activo si está en cada .env.</p>
+            <ul id="alert-feed" class="alert-feed">
+                <li class="muted">Cargando alertas…</li>
+            </ul>
+        </section>
+
         <section class="grid" id="metrics"></section>
         <div id="scheduler-layers" class="scheduler-layers muted">Capas del planificador: esperando datos del bot...</div>
         <p id="refresh-msg" class="muted refresh-msg">Sincronizacion automatica cada 15 min · deteccion de cambio de mercado cada 60 s</p>
@@ -689,11 +700,111 @@
             loadChart();
         });
 
+        const AlertFeed = {
+            lastId: 0,
+            browserOk: false,
+            kindClass(kind) {
+                const k = (kind || '').toLowerCase();
+                if (k === 'open') return 'alert-kind--open';
+                if (k === 'close') return 'alert-kind--close';
+                if (k === 'partial') return 'alert-kind--partial';
+                if (k === 'pending') return 'alert-kind--pending';
+                return '';
+            },
+            formatTime(ts) {
+                try {
+                    return new Date(Number(ts)).toLocaleString('es-ES', { hour12: false });
+                } catch {
+                    return '';
+                }
+            }
+        };
+
+        function maybeBrowserNotify(alert) {
+            if (!AlertFeed.browserOk || !window.Notification) {
+                return;
+            }
+            const title = (alert.source ? alert.source + ' · ' : '') + (alert.headline || alert.symbol);
+            try {
+                new Notification(title, {
+                    body: (alert.body || '').split('\n').slice(0, 4).join('\n'),
+                    tag: 'trade-' + String(alert.id)
+                });
+            } catch {
+                /* ignorar */
+            }
+        }
+
+        function renderAlertFeed(alerts) {
+            const ul = document.getElementById('alert-feed');
+            if (!alerts || !alerts.length) {
+                ul.innerHTML = '<li class="muted">Sin alertas recientes (cuando un bot opere aparecerán aquí).</li>';
+                return;
+            }
+            ul.innerHTML = alerts.slice().reverse().map((a) => {
+                const cls = AlertFeed.kindClass(a.kind);
+                const src = a.source ? ('<span class="alert-src">' + a.source + '</span>') : '';
+                const sym = a.symbol ? ('<strong>' + a.symbol + '</strong> · ') : '';
+                const body = a.body
+                    ? ('<pre class="alert-body">' + a.body.replace(/</g, '&lt;') + '</pre>')
+                    : '';
+                return '<li class="alert-item ' + cls + '">'
+                    + '<div class="alert-item__meta">' + src + ' <span class="muted">' + AlertFeed.formatTime(a.ts) + '</span></div>'
+                    + '<div class="alert-item__head">' + sym + (a.headline || '') + '</div>'
+                    + body
+                    + '</li>';
+            }).join('');
+        }
+
+        async function loadTradeAlerts() {
+            const res = await fetch('/api/trade-alerts?after=' + AlertFeed.lastId + '&limit=50', {
+                credentials: 'same-origin'
+            });
+            if (res.status === 401) {
+                window.location.href = '/login.html';
+                return;
+            }
+            if (!res.ok) {
+                return;
+            }
+            const data = await res.json();
+            const alerts = data.alerts || [];
+            if (!alerts.length) {
+                if (AlertFeed.lastId === 0) {
+                    renderAlertFeed([]);
+                }
+                return;
+            }
+            alerts.forEach((a) => {
+                AlertFeed.lastId = Math.max(AlertFeed.lastId, Number(a.id) || 0);
+                maybeBrowserNotify(a);
+            });
+            const allRes = await fetch('/api/trade-alerts?after=0&limit=40', { credentials: 'same-origin' });
+            if (allRes.ok) {
+                const allData = await allRes.json();
+                renderAlertFeed(allData.alerts || []);
+            }
+        }
+
+        document.getElementById('alert-notify-btn').addEventListener('click', async () => {
+            if (!window.Notification) {
+                alert('Este navegador no soporta notificaciones.');
+                return;
+            }
+            const perm = await Notification.requestPermission();
+            AlertFeed.browserOk = perm === 'granted';
+            document.getElementById('alert-notify-btn').textContent = AlertFeed.browserOk
+                ? 'Avisos navegador: ON'
+                : 'Activar avisos en el navegador';
+        });
+
         BotUI.sync().then(() => fullRefresh());
+        loadTradeAlerts();
         DashboardRefresh.timers.push(setInterval(() => BotUI.sync(), DashboardRefresh.BOT_MS));
         DashboardRefresh.timers.push(setInterval(() => loadStatus(), DashboardRefresh.MODE_MS));
         DashboardRefresh.timers.push(setInterval(() => fullRefresh(), DashboardRefresh.FULL_MS));
         DashboardRefresh.timers.push(setInterval(() => loadChart(), DashboardRefresh.CHART_MS));
+        DashboardRefresh.timers.push(setInterval(() => loadTradeAlerts(), 12000));
         DashboardRefresh.timers.push(setInterval(updateRefreshMessage, 1000));
         updateRefreshMessage();
     </script>
