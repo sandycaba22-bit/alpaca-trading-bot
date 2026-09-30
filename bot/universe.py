@@ -68,6 +68,29 @@ TOP50_US_STOCK_SYMBOLS: tuple[str, ...] = (
 
 UNIVERSE_CHOICES = frozenset({"elite", "top50"})
 
+# Élite vive en .env.stocks; Top 50 no debe repetirlos si comparten cuenta Alpaca.
+ELITE_TOP50_OVERLAP: frozenset[str] = frozenset(ELITE_STOCK_SYMBOLS) & frozenset(
+    TOP50_US_STOCK_SYMBOLS
+)
+
+TOP50_US_STOCK_SYMBOLS_EXCLUDING_ELITE: tuple[str, ...] = tuple(
+    s for s in TOP50_US_STOCK_SYMBOLS if s not in ELITE_STOCK_SYMBOLS
+)
+
+
+def apply_top50_elite_exclusion(
+    symbols: list[str],
+    *,
+    exclude: bool,
+) -> tuple[list[str], list[str]]:
+    """Quita tickers élite del universo Top 50 (evita doble compra misma paper)."""
+    if not exclude or not symbols:
+        return list(symbols), []
+    elite = frozenset(ELITE_STOCK_SYMBOLS)
+    removed = [s for s in symbols if s.upper() in elite]
+    kept = [s for s in symbols if s.upper() not in elite]
+    return kept, removed
+
 
 def symbols_for_universe(name: str) -> tuple[str, ...]:
     key = (name or "top50").strip().lower()

@@ -224,6 +224,8 @@ class Settings:
     risk_percent_per_trade: float = 0.01
     daily_loss_limit_pct: float = 0.03
     stock_entry_window: StockEntryWindow | None = None
+    stock_top50_exclude_elite_symbols: bool = True
+    stock_top50_elite_excluded: tuple[str, ...] = ()
     use_fixed_risk_sizing: bool = True
     market_stream_enabled: bool = True
     stream_stale_seconds: float = 120.0
@@ -382,10 +384,18 @@ def load_settings(env_path: Path | None = None) -> Settings:
             "No se arranca para evitar mezclar cuentas"
         )
 
-    from bot.universe import ELITE_STOCK_SYMBOLS, TOP50_US_STOCK_SYMBOLS
+    from bot.universe import (
+        ELITE_STOCK_SYMBOLS,
+        TOP50_US_STOCK_SYMBOLS_EXCLUDING_ELITE,
+        apply_top50_elite_exclusion,
+    )
 
+    top50_exclude_elite = _as_bool(
+        os.getenv("STOCK_TOP50_EXCLUDE_ELITE_SYMBOLS"),
+        default=bot_profile == "stocks_top50",
+    )
     if bot_profile == "stocks_top50":
-        default_syms = list(TOP50_US_STOCK_SYMBOLS)
+        default_syms = list(TOP50_US_STOCK_SYMBOLS_EXCLUDING_ELITE)
     elif bot_profile == "stocks":
         default_syms = list(ELITE_STOCK_SYMBOLS)
     else:
@@ -395,6 +405,15 @@ def load_settings(env_path: Path | None = None) -> Settings:
         default_syms,
         allow_empty=bot_profile not in {"stocks", "stocks_top50"},
     )
+    elite_excluded: tuple[str, ...] = ()
+    if bot_profile == "stocks_top50" and top50_exclude_elite:
+        stock_symbols, removed = apply_top50_elite_exclusion(stock_symbols, exclude=True)
+        elite_excluded = tuple(removed)
+        if not stock_symbols:
+            raise ValidationError(
+                "SYMBOLS vacío tras excluir tickers élite — pon STOCK_TOP50_EXCLUDE_ELITE_SYMBOLS=false "
+                "o usa otra cuenta Alpaca para élite y Top 50 sin solapamiento"
+            )
     crypto_symbols: list[str] = []
     data_dir = _resolve_data_dir(bot_profile, os.getenv("DATA_DIR"))
     telegram_prefix = _resolve_telegram_prefix(bot_profile, os.getenv("TELEGRAM_PREFIX"))
@@ -1182,6 +1201,8 @@ def load_settings(env_path: Path | None = None) -> Settings:
             name="DAILY_LOSS_LIMIT_PERCENT",
         ),
         stock_entry_window=parse_stock_entry_window_et(os.getenv("STOCK_ENTRY_WINDOW_ET")),
+        stock_top50_exclude_elite_symbols=top50_exclude_elite,
+        stock_top50_elite_excluded=elite_excluded,
         use_fixed_risk_sizing=_as_bool(os.getenv("USE_FIXED_RISK_SIZING"), default=True),
         market_stream_enabled=_as_bool(
             os.getenv("MARKET_STREAM_ENABLED"),

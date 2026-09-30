@@ -76,22 +76,28 @@ Pasos:
 4. `data-stocks/live_confirm.txt` según doc live.
 5. `pm2 restart trading-bot-stocks --update-env` — **no** mezcles keys live en `.env.stocks_top50`.
 
-## Si solo tienes **una** paper (turnos horarios — recomendado hasta 2.ª cuenta)
+## Si solo tienes **una** paper (sesión completa + sin solape)
 
-Los dos PM2 pueden correr con la **misma API key** si repartes **solo compras nuevas** por hora (ET):
+Los dos bots pueden correr **todo el día de mercado** (09:30–16:00 ET) con la **misma API key** si:
 
-| Bot | Variable | Horario ET |
-|-----|----------|------------|
-| Top 50 | `STOCK_ENTRY_WINDOW_ET=09:30-13:30` | Apertura → 13:30 |
-| Élite | `STOCK_ENTRY_WINDOW_ET=13:30-16:00` | 13:30 → cierre regular |
+1. **Quita** `STOCK_ENTRY_WINDOW_ET` en `.env.stocks` y `.env.stocks_top50` (o déjalo vacío).
+2. En Top 50: **`STOCK_TOP50_EXCLUDE_ELITE_SYMBOLS=true`** (default) — quita **GOOGL, META, NVDA, TSLA** del universo Top 50; la élite sigue operándolos (+ SLV, SPY).
 
-Fuera de su ventana: **no escanea entradas** (ahorra API); **sí** mark-to-market y **cierres** (SL/trail) en posiciones abiertas. A las 13:30 el turno de compras pasa a élite.
+Log Top 50: `Top 50 sin solape élite | excluidos (4): ...`
 
-En el VPS, añade esas líneas a cada `.env` y `pm2 restart ... --update-env`. Log de arranque: `ventana entradas=09:30-13:30 ET`.
+Verifica:
 
-Cuando saques la 2.ª paper, **quita** `STOCK_ENTRY_WINDOW_ET` en ambos (o déjalo vacío) para operar en paralelo sin turno.
+```bash
+python scripts/verify_dual_stock_separation.py
+```
 
-Otras opciones si no usas turnos:
+Con exclusión activa debe decir **OK misma cuenta: Top 50 excluye tickers élite**.
+
+Si tienes **dos papers** y quieres TSLA en ambas cuentas: `STOCK_TOP50_EXCLUDE_ELITE_SYMBOLS=false` en Top 50 **y** keys distintas.
+
+Turnos horarios (09:30–13:30 / 13:30–16:00) siguen disponibles con `STOCK_ENTRY_WINDOW_ET` si prefieres repartir API en una sola cuenta **sin** exclusión automática.
+
+Otras opciones:
 
 1. **Un bot activo:** Top 50 **o** élite; el otro pausado.
 2. Arreglar la **segunda paper** (ideal a medio plazo).

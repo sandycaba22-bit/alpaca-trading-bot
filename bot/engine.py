@@ -356,6 +356,12 @@ class TradingEngine:
                     self.settings.stock_entry_volume_period,
                     self.settings.sma_slow,
                 )
+            if self.settings.stock_top50_elite_excluded:
+                logger.info(
+                    "Top 50 sin solape élite | excluidos (%s): %s",
+                    len(self.settings.stock_top50_elite_excluded),
+                    ",".join(self.settings.stock_top50_elite_excluded),
+                )
             if self.settings.stock_asymmetric_exits_enabled:
                 logger.info(
                     "Acciones asimétrico | LIVE ON | SL=%.2fx ATR | TP=%s | trail=%.2fx ATR "

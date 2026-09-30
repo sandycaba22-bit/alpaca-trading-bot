@@ -1,7 +1,7 @@
 # Despliegue live acciones — vol_2x + SMA 50 (sweep 335031)
 
 Solo perfil **stocks** (`BOT_PROFILE=stocks`, PM2 `trading-bot-stocks`, panel **:3000**).  
-Bot secundario Top 50: `.env.stocks_top50` + PM2 `:3001` (paper). Ver `deploy/DEPLOY_STOCKS.md`.
+Bot secundario Top 50: `.env.stocks_top50` + PM2 `:3001` (paper). Sin turno horario: quitar `STOCK_ENTRY_WINDOW_ET`. Solape élite: `deploy/PAPER_DUAL_ACCOUNTS.md`.
 
 ## Parámetros (igual que backtest)
 

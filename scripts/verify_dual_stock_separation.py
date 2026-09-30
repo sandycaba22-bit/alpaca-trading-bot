@@ -7,6 +7,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from bot.universe import (
+    ELITE_TOP50_OVERLAP,
+    TOP50_US_STOCK_SYMBOLS,
+    apply_top50_elite_exclusion,
+)
 
 
 def _load_env(path: Path) -> dict[str, str]:
@@ -57,25 +64,66 @@ def main() -> int:
         return 2
 
     same_key = key_e == key_t
-    overlap = _symbols(elite.get("SYMBOLS", "")) & _symbols(top50.get("SYMBOLS", ""))
+    elite_syms = _symbols(elite.get("SYMBOLS", ""))
+    top50_raw = _symbols(top50.get("SYMBOLS", ""))
+    if not top50_raw:
+        top50_raw = {s.upper() for s in TOP50_US_STOCK_SYMBOLS}
+        print("(Top 50 SYMBOLS vacío — asumo universo TOP50_US_STOCK_SYMBOLS)")
+    exclude = top50.get("STOCK_TOP50_EXCLUDE_ELITE_SYMBOLS", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    top50_eff_list, removed = apply_top50_elite_exclusion(
+        sorted(top50_raw), exclude=exclude
+    )
+    top50_eff = set(top50_eff_list)
+    overlap_raw = elite_syms & top50_raw
+    overlap_effective = elite_syms & top50_eff
 
-    if overlap:
-        print(f"Símbolos en ambos universos ({len(overlap)}): {', '.join(sorted(overlap))}")
-        if same_key:
-            print(
-                "  → Con la MISMA cuenta, dos bots pueden comprar el mismo ticker el mismo día."
-            )
-        else:
-            print("  → OK si las cuentas Alpaca son distintas (exposición separada).")
+    if ELITE_TOP50_OVERLAP:
+        print(
+            f"Solape élite∩Top50 (universo): {', '.join(sorted(ELITE_TOP50_OVERLAP))}"
+        )
+    if exclude and removed:
+        print(f"Top 50 excluye élite ({len(removed)}): {', '.join(removed)}")
+
+    if overlap_raw:
+        print(f"Símbolos en ambos .env ({len(overlap_raw)}): {', '.join(sorted(overlap_raw))}")
 
     if same_key:
+        if overlap_effective:
+            print("")
+            print(
+                "CHOQUE: misma cuenta y solape efectivo tras exclusión: "
+                f"{', '.join(sorted(overlap_effective))}"
+            )
+            print(
+                "  → Pon STOCK_TOP50_EXCLUDE_ELITE_SYMBOLS=true en Top 50 "
+                "o usa keys Alpaca distintas."
+            )
+            return 1
+        if overlap_raw and not exclude:
+            print("")
+            print(
+                "CHOQUE: misma APCA_API_KEY_ID y STOCK_TOP50_EXCLUDE_ELITE_SYMBOLS=false."
+            )
+            return 1
         print("")
-        print("CHOQUE: misma APCA_API_KEY_ID en .env.stocks y .env.stocks_top50.")
-        print("Solución: segunda paper en Alpaca + keys distintas. Ver deploy/PAPER_DUAL_ACCOUNTS.md")
-        return 1
+        if overlap_raw and exclude:
+            print("OK misma cuenta: Top 50 excluye tickers élite — sin solape operativo.")
+        else:
+            print("OK misma cuenta: SYMBOLS sin solape entre bots.")
+        return 0
 
     print("")
     print("OK: cuentas Alpaca distintas (keys diferentes).")
+    if overlap_effective:
+        print(
+            f"Nota: solape operativo posible ({', '.join(sorted(overlap_effective))}) "
+            "— OK porque son cuentas separadas."
+        )
     return 0
 
 
