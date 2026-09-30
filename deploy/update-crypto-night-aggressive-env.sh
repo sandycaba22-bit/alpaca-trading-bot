@@ -52,5 +52,5 @@ if [[ "$CN_COUNT" -lt 7 ]]; then
 fi
 
 echo "=== Claves crypto night en $ENV ==="
-grep -nE '^(BOT_PROFILE|SWEEP_VARIANT|CRYPTO_NIGHT_|MAX_POSITIONS)=' "$ENV" || true
+grep -nE '^(BOT_PROFILE|SWEEP_VARIANT|MAX_POSITIONS|CRYPTO_NIGHT_[A-Z0-9_]+)=' "$ENV" || true
 echo "OK → pm2 restart crypto-night --update-env"
