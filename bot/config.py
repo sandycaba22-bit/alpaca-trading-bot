@@ -666,7 +666,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
             os.getenv("BREAKEVEN_ACTIVATE_ATR_MULT"),
             _be_atr_default,
             min_value=0.1,
-            max_value=5.0,
+            max_value=12.0,
             name="BREAKEVEN_ACTIVATE_ATR_MULT",
         ),
         breakeven_buffer=bounded_float(
