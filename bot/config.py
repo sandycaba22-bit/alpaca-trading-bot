@@ -159,7 +159,7 @@ class Settings:
     # TP por ATR en asimétrico (0 = sin TP, dejar correr solo trail). ~4.2x ATR ≈ 3.5R vs SL 1.2x.
     stock_asymmetric_tp_atr_mult: float = 0.0
     stock_asymmetric_tp_max_pct: float = 0.14
-    stock_asymmetric_tp_min_pct: float = 0.008
+    stock_asymmetric_tp_min_pct: float = 0.014
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
     stock_trade_best_only: bool = False
     stock_entry_score_min: float = 44.0
@@ -168,7 +168,8 @@ class Settings:
     stock_capital_protection_max_loss_pct: float = 0.04
     crypto_capital_protection_max_loss_pct: float = 0.05
     stock_atr_sl_mult: float = 2.0
-    stock_min_stop_pct: float = 0.0035
+    stock_min_stop_pct: float = 0.0
+    stock_max_stop_pct: float = 0.0025
     adx_period: int = 14
     adx_threshold: float = 20.0
     adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
@@ -355,6 +356,11 @@ def load_settings(env_path: Path | None = None) -> Settings:
     )
 
     bot_profile = _parse_bot_profile(os.getenv("BOT_PROFILE"))
+    _stock_profile = bot_profile in {"stocks", "stocks_top50"}
+    _be_pct_default = 0.007 if _stock_profile else 0.0015
+    _be_atr_default = 2.5 if _stock_profile else 0.5
+    _stock_min_stop_default = 0.0 if _stock_profile else 0.0035
+    _stock_tp_min_default = 0.014 if _stock_profile else 0.008
 
     api_key = os.getenv("APCA_API_KEY_ID", "").strip()
     api_secret = os.getenv("APCA_API_SECRET_KEY", "").strip()
@@ -646,14 +652,14 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         breakeven_activate_pct=bounded_float(
             os.getenv("BREAKEVEN_ACTIVATE_PCT"),
-            0.0015,
+            _be_pct_default,
             min_value=0.0001,
             max_value=0.05,
             name="BREAKEVEN_ACTIVATE_PCT",
         ),
         breakeven_activate_atr_mult=bounded_float(
             os.getenv("BREAKEVEN_ACTIVATE_ATR_MULT"),
-            0.5,
+            _be_atr_default,
             min_value=0.1,
             max_value=5.0,
             name="BREAKEVEN_ACTIVATE_ATR_MULT",
@@ -906,7 +912,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         stock_asymmetric_tp_min_pct=bounded_float(
             os.getenv("STOCK_ASYMMETRIC_TP_MIN_PCT"),
-            0.008,
+            _stock_tp_min_default,
             min_value=0.0,
             max_value=0.08,
             name="STOCK_ASYMMETRIC_TP_MIN_PCT",
@@ -954,10 +960,17 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         stock_min_stop_pct=bounded_float(
             os.getenv("STOCK_MIN_STOP_PCT"),
-            0.0035,
+            _stock_min_stop_default,
             min_value=0.0,
             max_value=0.02,
             name="STOCK_MIN_STOP_PCT",
+        ),
+        stock_max_stop_pct=bounded_float(
+            os.getenv("STOCK_MAX_STOP_PCT"),
+            0.0025 if _stock_profile else 0.0,
+            min_value=0.0,
+            max_value=0.02,
+            name="STOCK_MAX_STOP_PCT",
         ),
         adx_period=bounded_int(os.getenv("ADX_PERIOD"), 14, min_value=5, max_value=50, name="ADX_PERIOD"),
         adx_threshold=bounded_float(

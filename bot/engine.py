@@ -236,15 +236,18 @@ class TradingEngine:
             take_profit_price=take_profit_price,
             stop_pct=stop_pct,
             take_profit_pct=take_profit_pct,
+            max_stop_pct=self.settings.stock_max_stop_pct,
+            min_tp_pct=self.settings.stock_asymmetric_tp_min_pct,
         )
         if tp > 0 and "vol_2x" in (reason or "").lower():
             logger.debug(
-                "%s | vol_2x TP 1:2 | entry=%.4f SL=%.4f TP=%.4f (+%.2f%%)",
+                "%s | vol_2x SL<=%.2f%% TP>=%.2f%% | entry=%.4f SL=%.4f TP=%.4f",
                 symbol,
+                self.settings.stock_max_stop_pct * 100,
+                self.settings.stock_asymmetric_tp_min_pct * 100,
                 entry_price,
                 sp,
                 tp,
-                tpp * 100,
             )
         return sp, tp, st, tpp
 
@@ -396,8 +399,11 @@ class TradingEngine:
                 )
             if self.settings.stock_asymmetric_exits_enabled:
                 logger.info(
-                    "Acciones vol_2x TP | entradas Motivo vol_2x → TP obligatorio 1:2 desde SL "
-                    "(libro/Telegram; trailing ATR sigue activo)"
+                    "Acciones vol_2x TP | Motivo vol_2x → SL max %.2f%%, TP min %.2f%% "
+                    "(RR desde SL si supera el piso; trailing ATR tras BE +%.2f%%)",
+                    self.settings.stock_max_stop_pct * 100,
+                    self.settings.stock_asymmetric_tp_min_pct * 100,
+                    self.settings.breakeven_activate_pct * 100,
                 )
                 logger.info(
                     "Acciones asimétrico | LIVE ON | SL=%.2fx ATR | TP=%s | trail=%.2fx ATR "

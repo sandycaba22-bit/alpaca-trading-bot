@@ -99,8 +99,12 @@ class StopTakeProfitPolicy:
                 used_atr = True
             trailing_offset = atr_value * self.atr_trailing_mult
 
+        if self.max_stop_pct > 0:
+            stop_pct = min(stop_pct, self.max_stop_pct)
         if self.min_stop_pct > 0:
             stop_pct = max(stop_pct, self.min_stop_pct)
+        if self.min_tp_pct > 0:
+            tp_pct = max(tp_pct, self.min_tp_pct)
 
         long = qty >= 0
         if long:

@@ -463,13 +463,30 @@ def simulate_trades(
         )
         if use_rr:
             try:
-                from bot.risk.rr_take_profit import compute_rr_take_profit
+                from bot.risk.rr_take_profit import cap_stop_to_max_pct, enforce_vol2x_protective
 
-                tp, _ = compute_rr_take_profit(
-                    entry_price=entry,
-                    stop_price=sl,
-                    qty=qty,
+                cap = float(getattr(settings, "stock_max_stop_pct", 0.0) or 0.0)
+                min_tp = float(getattr(settings, "stock_asymmetric_tp_min_pct", 0.0) or 0.0)
+                if cap > 0:
+                    sl, _ = cap_stop_to_max_pct(
+                        entry_price=entry,
+                        stop_price=sl,
+                        qty=qty,
+                        symbol=symbol,
+                        max_stop_pct=cap,
+                    )
+                _, tp, _, _ = enforce_vol2x_protective(
                     symbol=symbol,
+                    side="buy",
+                    reason="vol_2x",
+                    entry_price=entry,
+                    qty=qty,
+                    stop_price=sl,
+                    take_profit_price=tp,
+                    stop_pct=None,
+                    take_profit_pct=None,
+                    max_stop_pct=cap if cap > 0 else None,
+                    min_tp_pct=min_tp if min_tp > 0 else None,
                 )
             except Exception:
                 tp = levels.take_profit_price

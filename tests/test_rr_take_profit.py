@@ -28,7 +28,7 @@ def test_short_rr_2():
 
 
 def test_enforce_replaces_zero_tp():
-    sp, tp, _, tp_pct = enforce_vol2x_protective(
+    sp, tp, st_pct, tp_pct = enforce_vol2x_protective(
         symbol="SLV",
         side="buy",
         reason="vol_2x",
@@ -39,9 +39,10 @@ def test_enforce_replaces_zero_tp():
         stop_pct=0.0035,
         take_profit_pct=0.0,
     )
-    assert sp == 24.9125
-    assert tp > 25.0
-    assert tp_pct > 0
+    assert st_pct <= 0.0025 + 1e-9
+    assert sp >= 24.9375 - 0.01
+    assert tp >= 25.0 * 1.014 - 0.02
+    assert tp_pct >= 0.014 - 1e-4
 
 
 def test_enforce_rejects_missing_stop():
