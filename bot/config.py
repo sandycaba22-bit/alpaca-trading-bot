@@ -347,7 +347,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
             env_path = Path(env_file)
             if not env_path.is_absolute():
                 env_path = PROJECT_ROOT / env_path
-    load_dotenv(env_path or PROJECT_ROOT / ".env")
+    load_dotenv(env_path or PROJECT_ROOT / ".env", override=True)
 
     from bot.risk.stock_sizing import (
         resolve_max_notional_per_order,

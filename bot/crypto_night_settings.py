@@ -83,7 +83,7 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         env_path = Path(env_file)
         if not env_path.is_absolute():
             env_path = PROJECT_ROOT / env_path
-    load_dotenv(env_path)
+    load_dotenv(env_path, override=True)
 
     profile = (os.getenv("BOT_PROFILE") or "crypto_night").strip().lower()
     if profile != "crypto_night":

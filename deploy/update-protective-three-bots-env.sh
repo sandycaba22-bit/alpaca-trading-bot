@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 set_kv() {
   local file="$1" key="$2" val="$3"
-  sed -i "/^${key}=/d" "$file"
+  sed -i "/^[[:space:]]*${key}=/d" "$file"
   echo "${key}=${val}" >> "$file"
 }
 
