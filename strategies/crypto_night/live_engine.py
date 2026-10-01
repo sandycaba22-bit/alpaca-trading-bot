@@ -15,7 +15,8 @@ from bot.alpaca.client import AlpacaClient
 from bot.alpaca.market_data import MarketDataService
 from bot.crypto_night_settings import CryptoNightSettings
 from bot.notify.telegram import TelegramNotifier
-from strategies.crypto_night.asymmetric_tp import round_crypto_price, take_profit_from_stop
+from strategies.crypto_night.asymmetric_tp import round_crypto_price
+from strategies.crypto_night.protective_pct import apply_crypto_night_protective
 from strategies.crypto_night.bias import resolve_night_bias
 from strategies.crypto_night.quality import score_setup
 from strategies.crypto_night.exits_live import ExitDecision, current_r, evaluate_exit
@@ -292,6 +293,7 @@ class CryptoNightEngine:
             if not ok:
                 logger.info("Sin trade | %s", reason)
                 return
+            self._apply_setup_protective(setup)
             self._maybe_place_limit(symbol, setup, bias)
             return
 
@@ -356,7 +358,13 @@ class CryptoNightEngine:
             px = float(tape.last_price)
             trade.best_r = max(trade.best_r, current_r(trade, px))
             decision = evaluate_exit(
-                trade, px, now, scale_at_1r=self.settings.scale_at_1r
+                trade,
+                px,
+                now,
+                scale_at_1r=self.settings.scale_at_1r,
+                breakeven_activate_pct=self.settings.breakeven_activate_pct,
+                breakeven_buffer_pct=self.settings.breakeven_buffer_pct,
+                trail_offset_pct=self.settings.max_stop_pct,
             )
             if decision.action == "hold":
                 continue
@@ -387,16 +395,19 @@ class CryptoNightEngine:
         trade.entry_price = fill_px
         trade.qty = filled_qty
         trade.qty_open = filled_qty
-        trade.runner_stop = trade.stop_price
         trade.entry_time_utc = datetime.now(timezone.utc).isoformat()
         trade.status = "open"
-        tp_raw = take_profit_from_stop(
+        sp, tp_px, stop_pct, tp_pct = apply_crypto_night_protective(
             entry_price=fill_px,
             stop_price=float(trade.stop_price),
             side=trade.side,
             reward_risk=self.settings.tp_reward_risk,
+            max_stop_pct=self.settings.max_stop_pct,
+            min_tp_pct=self.settings.min_tp_pct,
         )
-        trade.take_profit_price = round_crypto_price(tp_raw, ref=fill_px)
+        trade.stop_price = sp
+        trade.runner_stop = sp
+        trade.take_profit_price = round_crypto_price(tp_px, ref=fill_px)
         if trade.take_profit_price <= 0:
             logger.warning("%s | TP asimétrico inválido — no se abre stop/TP broker", trade.symbol)
             trade.status = "closed"
@@ -419,13 +430,13 @@ class CryptoNightEngine:
             trade.stop_order_id = str(getattr(stop_order, "id", "") or "")
             self._submit_take_profit_limit(trade)
             logger.info(
-                "%s | entrada fill @ %.4f | stop broker @ %.4f id=%s | TP @ %.4f (%.1fR) id=%s",
+                "%s | entrada fill @ %.4f | stop @ %.4f (-%.2f%%) | TP @ %.4f (+%.2f%%) id=%s",
                 trade.symbol,
                 fill_px,
                 trade.stop_price,
-                trade.stop_order_id,
+                stop_pct * 100,
                 trade.take_profit_price,
-                self.settings.tp_reward_risk,
+                tp_pct * 100,
                 trade.take_profit_order_id or "—",
             )
             side = "buy" if trade.side == TradeSide.LONG.value else "sell"
@@ -637,6 +648,18 @@ class CryptoNightEngine:
             self.settings.dry_run,
         )
 
+    def _apply_setup_protective(self, setup) -> None:
+        side = setup.side.value if hasattr(setup.side, "value") else str(setup.side)
+        sp, _, _, _ = apply_crypto_night_protective(
+            entry_price=float(setup.limit_price),
+            stop_price=float(setup.stop_price),
+            side=side,
+            reward_risk=self.settings.tp_reward_risk,
+            max_stop_pct=self.settings.max_stop_pct,
+            min_tp_pct=self.settings.min_tp_pct,
+        )
+        setup.stop_price = sp
+
     def _maybe_place_limit(self, symbol: str, setup, bias) -> None:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest
@@ -782,12 +805,14 @@ class CryptoNightEngine:
             risk_note,
             flat_note,
         )
-        exit_mode = (
-            f"TP broker+software @ {self.settings.tp_reward_risk}R, scale@1R={self.settings.scale_at_1r}"
-        )
         logger.info(
-            "Salidas live | stop GTC al fill | %s | time 3h | %s | libro %s",
-            exit_mode,
+            "Salidas live | SL max %.2f%% | TP min %.2f%% (RR %.1f si mayor) | "
+            "BE/trail desde +%.2f%% | scale@1R=%s | time 3h | %s | libro %s",
+            self.settings.max_stop_pct * 100,
+            self.settings.min_tp_pct * 100,
+            self.settings.tp_reward_risk,
+            self.settings.breakeven_activate_pct * 100,
+            self.settings.scale_at_1r,
             flat_note,
             self._trades_path.name,
         )

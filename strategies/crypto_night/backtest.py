@@ -49,22 +49,29 @@ def _simulate_exit(
     max_bars: int = 12,
     tp_reward_risk: float = 2.5,
     scale_at_1r: bool = False,
+    max_stop_pct: float = 0.0025,
+    min_tp_pct: float = 0.014,
+    breakeven_activate_pct: float = 0.007,
+    breakeven_buffer_pct: float = 0.0005,
 ) -> tuple[float, str]:
-    """Salida: TP fijo tp_reward_risk × R, o legacy scale @1R si scale_at_1r."""
+    """Salida: TP piso %% + SL tope %%; BE/trail tras breakeven_activate_pct."""
     entry = setup.limit_price
-    risk = abs(entry - setup.stop_price)
-    if risk <= 0:
-        return 0.0, "invalid_risk"
-    from strategies.crypto_night.asymmetric_tp import take_profit_from_stop
-
     side = setup.side
     side_s = side.value if hasattr(side, "value") else str(side)
-    tp_px = take_profit_from_stop(
-        entry_price=entry,
-        stop_price=setup.stop_price,
+    from strategies.crypto_night.protective_pct import apply_crypto_night_protective
+
+    sp, tp_px, _, _ = apply_crypto_night_protective(
+        entry_price=float(entry),
+        stop_price=float(setup.stop_price),
         side=side_s,
         reward_risk=tp_reward_risk,
+        max_stop_pct=max_stop_pct,
+        min_tp_pct=min_tp_pct,
     )
+    setup.stop_price = sp
+    risk = abs(entry - sp)
+    if risk <= 0:
+        return 0.0, "invalid_risk"
     partial_taken = False
     runner_sl = setup.stop_price
     best_r = 0.0
@@ -91,13 +98,30 @@ def _simulate_exit(
                 return r - FEE_SLIP_R, "stop"
             cur_r = (entry - lo) / risk
         best_r = max(best_r, cur_r)
+        if side == TradeSide.LONG:
+            upnl_hi = (hi - entry) / entry if entry > 0 else 0.0
+        else:
+            upnl_hi = (entry - lo) / entry if entry > 0 else 0.0
         if scale_at_1r and not partial_taken and cur_r >= 1.0:
-            partial_taken = True
-            runner_sl = entry + 0.3 * risk if side == TradeSide.LONG else entry - 0.3 * risk
+            if breakeven_activate_pct <= 0 or upnl_hi >= breakeven_activate_pct:
+                partial_taken = True
+                runner_sl = entry + 0.3 * risk if side == TradeSide.LONG else entry - 0.3 * risk
         if scale_at_1r and partial_taken and cur_r >= 2.0:
-            runner_sl = (
-                entry + 1.5 * risk if side == TradeSide.LONG else entry - 1.5 * risk
-            )
+            if breakeven_activate_pct <= 0 or upnl_hi >= breakeven_activate_pct:
+                runner_sl = (
+                    entry + 1.5 * risk if side == TradeSide.LONG else entry - 1.5 * risk
+                )
+        if breakeven_activate_pct > 0 and upnl_hi >= breakeven_activate_pct:
+            buf = entry * breakeven_buffer_pct
+            offset = max(risk, entry * max_stop_pct)
+            if side == TradeSide.LONG:
+                be_floor = entry + buf
+                trail_floor = hi - offset
+                runner_sl = max(runner_sl, be_floor, trail_floor)
+            else:
+                be_floor = entry - buf
+                trail_floor = lo + offset
+                runner_sl = min(runner_sl, be_floor, trail_floor)
     if best_r < 0.5:
         return best_r - FEE_SLIP_R, "time_stop"
     return best_r - FEE_SLIP_R, "time_exit"
@@ -132,6 +156,10 @@ def run_variant_backtest(
     limits: RiskLimits | None = None,
     tp_reward_risk: float = 2.5,
     scale_at_1r: bool = False,
+    max_stop_pct: float = 0.0025,
+    min_tp_pct: float = 0.014,
+    breakeven_activate_pct: float = 0.007,
+    breakeven_buffer_pct: float = 0.0005,
     vol_pct_low: float = 30.0,
     vol_pct_high: float = 70.0,
     min_volume_ratio: float = 1.5,
@@ -200,6 +228,18 @@ def run_variant_backtest(
         if setup is None:
             stats.rejections[RejectReason.ENTRY] += 1
             continue
+        from strategies.crypto_night.protective_pct import apply_crypto_night_protective
+
+        side_s = setup.side.value if hasattr(setup.side, "value") else str(setup.side)
+        sp, _, _, _ = apply_crypto_night_protective(
+            entry_price=float(setup.limit_price),
+            stop_price=float(setup.stop_price),
+            side=side_s,
+            reward_risk=tp_reward_risk,
+            max_stop_pct=max_stop_pct,
+            min_tp_pct=min_tp_pct,
+        )
+        setup.stop_price = sp
         setup.atr_1h = float(
             bars_1h["close"].astype(float).diff().abs().rolling(14).mean().iloc[-1]
             if len(bars_1h) > 14
@@ -235,6 +275,10 @@ def run_variant_backtest(
             setup,
             tp_reward_risk=tp_reward_risk,
             scale_at_1r=scale_at_1r,
+            max_stop_pct=max_stop_pct,
+            min_tp_pct=min_tp_pct,
+            breakeven_activate_pct=breakeven_activate_pct,
+            breakeven_buffer_pct=breakeven_buffer_pct,
         )
         stats.trades += 1
         stats.r_net_sum += r_net

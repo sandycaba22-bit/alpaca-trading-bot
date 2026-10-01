@@ -1,4 +1,4 @@
-"""Salidas live alineadas al backtest: 50%% @1R, trail runner, time stop 3h."""
+"""Salidas live: TP fijo, time stop 3h; BE/trail solo tras ganancia mínima (%%)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from strategies.crypto_night.position_book import NightTradeRecord
+from strategies.crypto_night.protective_pct import unrealized_pct
 from strategies.crypto_night.types import TradeSide
 
 
@@ -59,6 +60,9 @@ def evaluate_exit(
     now: datetime,
     *,
     scale_at_1r: bool = False,
+    breakeven_activate_pct: float = 0.007,
+    breakeven_buffer_pct: float = 0.0005,
+    trail_offset_pct: float = 0.0025,
 ) -> ExitDecision:
     if trade.entry_price is None or trade.qty_open <= 0:
         return ExitDecision("hold")
@@ -105,38 +109,68 @@ def evaluate_exit(
                 reason="time_exit",
             )
 
+    entry = float(trade.entry_price)
+    upnl = unrealized_pct(entry_price=entry, last_price=last_price, side=trade.side)
+    be_threshold = max(0.0, float(breakeven_activate_pct))
+
     if scale_at_1r and not trade.partial_taken and r >= 1.0:
-        entry = float(trade.entry_price)
-        if trade.side == TradeSide.LONG.value:
-            new_stop = entry + 0.3 * risk
+        if be_threshold > 0 and upnl < be_threshold:
+            pass
         else:
-            new_stop = entry - 0.3 * risk
-        half = trade.qty_open / 2.0
-        close_qty = half if half > 0 else trade.qty_open
-        return ExitDecision(
-            "partial_1r",
-            close_qty=close_qty,
-            new_runner_stop=new_stop,
-            reason="scale_1r",
-        )
+            if trade.side == TradeSide.LONG.value:
+                new_stop = entry + 0.3 * risk
+            else:
+                new_stop = entry - 0.3 * risk
+            half = trade.qty_open / 2.0
+            close_qty = half if half > 0 else trade.qty_open
+            return ExitDecision(
+                "partial_1r",
+                close_qty=close_qty,
+                new_runner_stop=new_stop,
+                reason="scale_1r",
+            )
 
     if scale_at_1r and trade.partial_taken and r >= 2.0:
-        entry = float(trade.entry_price)
+        if be_threshold <= 0 or upnl >= be_threshold:
+            if trade.side == TradeSide.LONG.value:
+                trail = entry + 1.5 * risk
+                if trail > trade.runner_stop:
+                    return ExitDecision(
+                        "update_stop",
+                        new_runner_stop=trail,
+                        reason="trail_2r",
+                    )
+            else:
+                trail = entry - 1.5 * risk
+                if trail < trade.runner_stop:
+                    return ExitDecision(
+                        "update_stop",
+                        new_runner_stop=trail,
+                        reason="trail_2r",
+                    )
+
+    if be_threshold > 0 and upnl >= be_threshold:
+        buf = entry * max(0.0, float(breakeven_buffer_pct))
+        offset = max(risk, entry * max(0.0, float(trail_offset_pct)))
         if trade.side == TradeSide.LONG.value:
-            trail = entry + 1.5 * risk
-            if trail > trade.runner_stop:
+            be_floor = entry + buf
+            trail_floor = last_price - offset
+            new_stop = max(trade.runner_stop, be_floor, trail_floor)
+            if new_stop > trade.runner_stop + 1e-12:
                 return ExitDecision(
                     "update_stop",
-                    new_runner_stop=trail,
-                    reason="trail_2r",
+                    new_runner_stop=new_stop,
+                    reason="trail_be",
                 )
         else:
-            trail = entry - 1.5 * risk
-            if trail < trade.runner_stop:
+            be_floor = entry - buf
+            trail_floor = last_price + offset
+            new_stop = min(trade.runner_stop, be_floor, trail_floor)
+            if new_stop < trade.runner_stop - 1e-12:
                 return ExitDecision(
                     "update_stop",
-                    new_runner_stop=trail,
-                    reason="trail_2r",
+                    new_runner_stop=new_stop,
+                    reason="trail_be",
                 )
 
     return ExitDecision("hold")

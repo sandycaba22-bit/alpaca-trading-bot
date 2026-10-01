@@ -18,7 +18,20 @@ from strategies.crypto_night.filter_profile import (
     parse_filter_profile,
 )
 from strategies.crypto_night.session import crypto_session_mode
+from strategies.crypto_night.protective_pct import (
+    DEFAULT_BREAKEVEN_ACTIVATE_PCT,
+    DEFAULT_BREAKEVEN_BUFFER_PCT,
+    DEFAULT_MAX_STOP_PCT,
+    DEFAULT_MIN_TP_PCT,
+)
 from strategies.crypto_night.variants import SweepVariant, parse_sweep_variant
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return float(raw)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -54,6 +67,10 @@ class CryptoNightSettings:
     max_trades_per_night: int
     tp_reward_risk: float
     scale_at_1r: bool
+    max_stop_pct: float
+    min_tp_pct: float
+    breakeven_activate_pct: float
+    breakeven_buffer_pct: float
 
 
 def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSettings:
@@ -125,6 +142,14 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         max_positions=int(os.getenv("MAX_POSITIONS", "2")),
         tp_reward_risk=float(os.getenv("CRYPTO_NIGHT_TP_REWARD_RISK", "2.5")),
         scale_at_1r=_env_bool("CRYPTO_NIGHT_SCALE_AT_1R", default=False),
+        max_stop_pct=_env_float("CRYPTO_NIGHT_MAX_STOP_PCT", DEFAULT_MAX_STOP_PCT),
+        min_tp_pct=_env_float("CRYPTO_NIGHT_MIN_TP_PCT", DEFAULT_MIN_TP_PCT),
+        breakeven_activate_pct=_env_float(
+            "CRYPTO_NIGHT_BREAKEVEN_ACTIVATE_PCT", DEFAULT_BREAKEVEN_ACTIVATE_PCT
+        ),
+        breakeven_buffer_pct=_env_float(
+            "CRYPTO_NIGHT_BREAKEVEN_BUFFER_PCT", DEFAULT_BREAKEVEN_BUFFER_PCT
+        ),
         bias_mode=bias_mode,
         filter_profile=filter_profile,
         filters=filters,
