@@ -60,9 +60,9 @@ def evaluate_exit(
     now: datetime,
     *,
     scale_at_1r: bool = False,
-    breakeven_activate_pct: float = 0.007,
-    breakeven_buffer_pct: float = 0.0005,
-    trail_offset_pct: float = 0.0025,
+    breakeven_activate_pct: float = 0.00375,
+    breakeven_buffer_pct: float = 0.0,
+    trail_offset_pct: float = 0.0021,
 ) -> ExitDecision:
     if trade.entry_price is None or trade.qty_open <= 0:
         return ExitDecision("hold")
@@ -151,26 +151,21 @@ def evaluate_exit(
 
     if be_threshold > 0 and upnl >= be_threshold:
         buf = entry * max(0.0, float(breakeven_buffer_pct))
-        offset = max(risk, entry * max(0.0, float(trail_offset_pct)))
         if trade.side == TradeSide.LONG.value:
-            be_floor = entry + buf
-            trail_floor = last_price - offset
-            new_stop = max(trade.runner_stop, be_floor, trail_floor)
-            if new_stop > trade.runner_stop + 1e-12:
+            be_stop = entry + buf
+            if trade.runner_stop < be_stop - 1e-12:
                 return ExitDecision(
                     "update_stop",
-                    new_runner_stop=new_stop,
-                    reason="trail_be",
+                    new_runner_stop=be_stop,
+                    reason="breakeven_lock",
                 )
         else:
-            be_floor = entry - buf
-            trail_floor = last_price + offset
-            new_stop = min(trade.runner_stop, be_floor, trail_floor)
-            if new_stop < trade.runner_stop - 1e-12:
+            be_stop = entry - buf
+            if trade.runner_stop > be_stop + 1e-12:
                 return ExitDecision(
                     "update_stop",
-                    new_runner_stop=new_stop,
-                    reason="trail_be",
+                    new_runner_stop=be_stop,
+                    reason="breakeven_lock",
                 )
 
     return ExitDecision("hold")

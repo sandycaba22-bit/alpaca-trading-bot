@@ -39,10 +39,10 @@ def test_enforce_replaces_zero_tp():
         stop_pct=0.0035,
         take_profit_pct=0.0,
     )
-    assert st_pct <= 0.0025 + 1e-9
-    assert sp >= 24.9375 - 0.01
-    assert tp >= 25.0 * 1.014 - 0.02
-    assert tp_pct >= 0.014 - 1e-4
+    assert st_pct <= 0.0021 + 1e-9
+    assert sp >= 25.0 * (1 - 0.0021) - 0.02
+    assert tp_pct >= 0.0065 - 1e-4
+    assert tp_pct <= 0.008 + 1e-4
 
 
 def test_enforce_rejects_missing_stop():

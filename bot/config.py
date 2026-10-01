@@ -158,8 +158,9 @@ class Settings:
     stock_asymmetric_trail_atr_mult: float = 2.75
     # TP por ATR en asimétrico (0 = sin TP, dejar correr solo trail). ~4.2x ATR ≈ 3.5R vs SL 1.2x.
     stock_asymmetric_tp_atr_mult: float = 0.0
-    stock_asymmetric_tp_max_pct: float = 0.14
-    stock_asymmetric_tp_min_pct: float = 0.014
+    stock_asymmetric_tp_max_pct: float = 0.008
+    stock_asymmetric_tp_min_pct: float = 0.0065
+    stock_tp_target_pct: float = 0.0075
     # Acciones (sesión): solo comprar el ticker con mejor momentum HTF
     stock_trade_best_only: bool = False
     stock_entry_score_min: float = 44.0
@@ -169,7 +170,7 @@ class Settings:
     crypto_capital_protection_max_loss_pct: float = 0.05
     stock_atr_sl_mult: float = 2.0
     stock_min_stop_pct: float = 0.0
-    stock_max_stop_pct: float = 0.0025
+    stock_max_stop_pct: float = 0.0021
     adx_period: int = 14
     adx_threshold: float = 20.0
     adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
@@ -357,10 +358,14 @@ def load_settings(env_path: Path | None = None) -> Settings:
 
     bot_profile = _parse_bot_profile(os.getenv("BOT_PROFILE"))
     _stock_profile = bot_profile in {"stocks", "stocks_top50"}
-    _be_pct_default = 0.007 if _stock_profile else 0.0015
-    _be_atr_default = 2.5 if _stock_profile else 0.5
+    _be_pct_default = 0.00375 if _stock_profile else 0.0015
+    _be_atr_default = 10.0 if _stock_profile else 0.5
     _stock_min_stop_default = 0.0 if _stock_profile else 0.0035
-    _stock_tp_min_default = 0.014 if _stock_profile else 0.008
+    _stock_tp_min_default = 0.0065 if _stock_profile else 0.008
+    _stock_tp_max_default = 0.008 if _stock_profile else 0.14
+    _stock_tp_target_default = 0.0075 if _stock_profile else 0.05
+    _stock_max_stop_default = 0.0021 if _stock_profile else 0.0
+    _be_buffer_default = 0.0 if _stock_profile else 0.0
 
     api_key = os.getenv("APCA_API_KEY_ID", "").strip()
     api_secret = os.getenv("APCA_API_SECRET_KEY", "").strip()
@@ -666,7 +671,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         breakeven_buffer=bounded_float(
             os.getenv("BREAKEVEN_BUFFER"),
-            0.0,
+            _be_buffer_default,
             min_value=0.0,
             max_value=50.0,
             name="BREAKEVEN_BUFFER",
@@ -905,8 +910,8 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         stock_asymmetric_tp_max_pct=bounded_float(
             os.getenv("STOCK_ASYMMETRIC_TP_MAX_PCT"),
-            0.14,
-            min_value=0.01,
+            _stock_tp_max_default,
+            min_value=0.001,
             max_value=0.35,
             name="STOCK_ASYMMETRIC_TP_MAX_PCT",
         ),
@@ -916,6 +921,13 @@ def load_settings(env_path: Path | None = None) -> Settings:
             min_value=0.0,
             max_value=0.08,
             name="STOCK_ASYMMETRIC_TP_MIN_PCT",
+        ),
+        stock_tp_target_pct=bounded_float(
+            os.getenv("STOCK_TP_TARGET_PCT"),
+            _stock_tp_target_default,
+            min_value=0.0,
+            max_value=0.08,
+            name="STOCK_TP_TARGET_PCT",
         ),
         stock_trade_best_only=_as_bool(
             os.getenv("STOCK_TRADE_BEST_ONLY"),
@@ -967,7 +979,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         stock_max_stop_pct=bounded_float(
             os.getenv("STOCK_MAX_STOP_PCT"),
-            0.0025 if _stock_profile else 0.0,
+            _stock_max_stop_default,
             min_value=0.0,
             max_value=0.02,
             name="STOCK_MAX_STOP_PCT",

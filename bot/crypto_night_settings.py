@@ -22,7 +22,9 @@ from strategies.crypto_night.protective_pct import (
     DEFAULT_BREAKEVEN_ACTIVATE_PCT,
     DEFAULT_BREAKEVEN_BUFFER_PCT,
     DEFAULT_MAX_STOP_PCT,
+    DEFAULT_MAX_TP_PCT,
     DEFAULT_MIN_TP_PCT,
+    DEFAULT_TP_TARGET_PCT,
 )
 from strategies.crypto_night.variants import SweepVariant, parse_sweep_variant
 
@@ -69,6 +71,8 @@ class CryptoNightSettings:
     scale_at_1r: bool
     max_stop_pct: float
     min_tp_pct: float
+    max_tp_pct: float
+    tp_target_pct: float
     breakeven_activate_pct: float
     breakeven_buffer_pct: float
 
@@ -144,6 +148,8 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         scale_at_1r=_env_bool("CRYPTO_NIGHT_SCALE_AT_1R", default=False),
         max_stop_pct=_env_float("CRYPTO_NIGHT_MAX_STOP_PCT", DEFAULT_MAX_STOP_PCT),
         min_tp_pct=_env_float("CRYPTO_NIGHT_MIN_TP_PCT", DEFAULT_MIN_TP_PCT),
+        max_tp_pct=_env_float("CRYPTO_NIGHT_MAX_TP_PCT", DEFAULT_MAX_TP_PCT),
+        tp_target_pct=_env_float("CRYPTO_NIGHT_TP_TARGET_PCT", DEFAULT_TP_TARGET_PCT),
         breakeven_activate_pct=_env_float(
             "CRYPTO_NIGHT_BREAKEVEN_ACTIVATE_PCT", DEFAULT_BREAKEVEN_ACTIVATE_PCT
         ),

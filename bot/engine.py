@@ -238,13 +238,15 @@ class TradingEngine:
             take_profit_pct=take_profit_pct,
             max_stop_pct=self.settings.stock_max_stop_pct,
             min_tp_pct=self.settings.stock_asymmetric_tp_min_pct,
+            max_tp_pct=self.settings.stock_asymmetric_tp_max_pct,
+            target_tp_pct=self.settings.stock_tp_target_pct,
         )
         if tp > 0 and "vol_2x" in (reason or "").lower():
             logger.debug(
-                "%s | vol_2x SL<=%.2f%% TP>=%.2f%% | entry=%.4f SL=%.4f TP=%.4f",
+                "%s | vol_2x SL<=%.2f%% TP~%.2f%% | entry=%.4f SL=%.4f TP=%.4f",
                 symbol,
                 self.settings.stock_max_stop_pct * 100,
-                self.settings.stock_asymmetric_tp_min_pct * 100,
+                tpp * 100,
                 entry_price,
                 sp,
                 tp,
@@ -399,10 +401,12 @@ class TradingEngine:
                 )
             if self.settings.stock_asymmetric_exits_enabled:
                 logger.info(
-                    "Acciones vol_2x TP | Motivo vol_2x → SL max %.2f%%, TP min %.2f%% "
-                    "(RR desde SL si supera el piso; trailing ATR tras BE +%.2f%%)",
+                    "Acciones vol_2x TP | SL max %.2f%% | TP fijo %.2f–%.2f%% (obj %.2f%%) | "
+                    "BE en entrada +%.2f%%",
                     self.settings.stock_max_stop_pct * 100,
                     self.settings.stock_asymmetric_tp_min_pct * 100,
+                    self.settings.stock_asymmetric_tp_max_pct * 100,
+                    self.settings.stock_tp_target_pct * 100,
                     self.settings.breakeven_activate_pct * 100,
                 )
                 logger.info(

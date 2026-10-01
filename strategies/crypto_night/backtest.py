@@ -49,10 +49,12 @@ def _simulate_exit(
     max_bars: int = 12,
     tp_reward_risk: float = 2.5,
     scale_at_1r: bool = False,
-    max_stop_pct: float = 0.0025,
-    min_tp_pct: float = 0.014,
-    breakeven_activate_pct: float = 0.007,
-    breakeven_buffer_pct: float = 0.0005,
+    max_stop_pct: float = 0.0021,
+    min_tp_pct: float = 0.0065,
+    max_tp_pct: float = 0.008,
+    target_tp_pct: float = 0.0075,
+    breakeven_activate_pct: float = 0.00375,
+    breakeven_buffer_pct: float = 0.0,
 ) -> tuple[float, str]:
     """Salida: TP piso %% + SL tope %%; BE/trail tras breakeven_activate_pct."""
     entry = setup.limit_price
@@ -67,6 +69,8 @@ def _simulate_exit(
         reward_risk=tp_reward_risk,
         max_stop_pct=max_stop_pct,
         min_tp_pct=min_tp_pct,
+        max_tp_pct=max_tp_pct,
+        target_tp_pct=target_tp_pct,
     )
     setup.stop_price = sp
     risk = abs(entry - sp)
@@ -113,15 +117,10 @@ def _simulate_exit(
                 )
         if breakeven_activate_pct > 0 and upnl_hi >= breakeven_activate_pct:
             buf = entry * breakeven_buffer_pct
-            offset = max(risk, entry * max_stop_pct)
             if side == TradeSide.LONG:
-                be_floor = entry + buf
-                trail_floor = hi - offset
-                runner_sl = max(runner_sl, be_floor, trail_floor)
+                runner_sl = max(runner_sl, entry + buf)
             else:
-                be_floor = entry - buf
-                trail_floor = lo + offset
-                runner_sl = min(runner_sl, be_floor, trail_floor)
+                runner_sl = min(runner_sl, entry - buf)
     if best_r < 0.5:
         return best_r - FEE_SLIP_R, "time_stop"
     return best_r - FEE_SLIP_R, "time_exit"
@@ -156,10 +155,12 @@ def run_variant_backtest(
     limits: RiskLimits | None = None,
     tp_reward_risk: float = 2.5,
     scale_at_1r: bool = False,
-    max_stop_pct: float = 0.0025,
-    min_tp_pct: float = 0.014,
-    breakeven_activate_pct: float = 0.007,
-    breakeven_buffer_pct: float = 0.0005,
+    max_stop_pct: float = 0.0021,
+    min_tp_pct: float = 0.0065,
+    max_tp_pct: float = 0.008,
+    target_tp_pct: float = 0.0075,
+    breakeven_activate_pct: float = 0.00375,
+    breakeven_buffer_pct: float = 0.0,
     vol_pct_low: float = 30.0,
     vol_pct_high: float = 70.0,
     min_volume_ratio: float = 1.5,
@@ -238,6 +239,8 @@ def run_variant_backtest(
             reward_risk=tp_reward_risk,
             max_stop_pct=max_stop_pct,
             min_tp_pct=min_tp_pct,
+            max_tp_pct=max_tp_pct,
+            target_tp_pct=target_tp_pct,
         )
         setup.stop_price = sp
         setup.atr_1h = float(
@@ -277,6 +280,8 @@ def run_variant_backtest(
             scale_at_1r=scale_at_1r,
             max_stop_pct=max_stop_pct,
             min_tp_pct=min_tp_pct,
+            max_tp_pct=max_tp_pct,
+            target_tp_pct=target_tp_pct,
             breakeven_activate_pct=breakeven_activate_pct,
             breakeven_buffer_pct=breakeven_buffer_pct,
         )

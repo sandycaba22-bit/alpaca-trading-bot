@@ -404,6 +404,8 @@ class CryptoNightEngine:
             reward_risk=self.settings.tp_reward_risk,
             max_stop_pct=self.settings.max_stop_pct,
             min_tp_pct=self.settings.min_tp_pct,
+            max_tp_pct=self.settings.max_tp_pct,
+            target_tp_pct=self.settings.tp_target_pct,
         )
         trade.stop_price = sp
         trade.runner_stop = sp
@@ -657,6 +659,8 @@ class CryptoNightEngine:
             reward_risk=self.settings.tp_reward_risk,
             max_stop_pct=self.settings.max_stop_pct,
             min_tp_pct=self.settings.min_tp_pct,
+            max_tp_pct=self.settings.max_tp_pct,
+            target_tp_pct=self.settings.tp_target_pct,
         )
         setup.stop_price = sp
 
@@ -806,11 +810,12 @@ class CryptoNightEngine:
             flat_note,
         )
         logger.info(
-            "Salidas live | SL max %.2f%% | TP min %.2f%% (RR %.1f si mayor) | "
-            "BE/trail desde +%.2f%% | scale@1R=%s | time 3h | %s | libro %s",
+            "Salidas live | SL max %.2f%% | TP fijo %.2f–%.2f%% (obj %.2f%%) | "
+            "BE en entrada +%.2f%% | scale@1R=%s | time 3h | %s | libro %s",
             self.settings.max_stop_pct * 100,
             self.settings.min_tp_pct * 100,
-            self.settings.tp_reward_risk,
+            self.settings.max_tp_pct * 100,
+            self.settings.tp_target_pct * 100,
             self.settings.breakeven_activate_pct * 100,
             self.settings.scale_at_1r,
             flat_note,

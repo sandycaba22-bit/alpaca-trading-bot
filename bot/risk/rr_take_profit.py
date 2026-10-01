@@ -5,10 +5,19 @@ from __future__ import annotations
 from bot.market.assets import is_crypto_symbol, normalize_symbol
 from bot.security.exceptions import ValidationError
 
+from bot.risk.protective_profile import (
+    MAX_STOP_PCT as PROFILE_MAX_STOP_PCT,
+    TP_MAX_PCT as PROFILE_TP_MAX_PCT,
+    TP_MIN_PCT as PROFILE_TP_MIN_PCT,
+    TP_TARGET_PCT as PROFILE_TP_TARGET_PCT,
+    clamp_tp_pct,
+)
+
 DEFAULT_REWARD_RISK = 2.0
-# Acciones vol_2x: SL ceñido + TP mínimo (sostenible vs micro-BE)
-DEFAULT_STOCK_MAX_STOP_PCT = 0.0025
-DEFAULT_STOCK_MIN_TP_PCT = 0.014
+DEFAULT_STOCK_MAX_STOP_PCT = PROFILE_MAX_STOP_PCT
+DEFAULT_STOCK_MIN_TP_PCT = PROFILE_TP_MIN_PCT
+DEFAULT_STOCK_MAX_TP_PCT = PROFILE_TP_MAX_PCT
+DEFAULT_STOCK_TP_TARGET_PCT = PROFILE_TP_TARGET_PCT
 
 
 def _round_protective_price(price: float, symbol: str) -> float:
@@ -115,6 +124,8 @@ def enforce_vol2x_protective(
     reward_risk: float = DEFAULT_REWARD_RISK,
     max_stop_pct: float | None = None,
     min_tp_pct: float | None = None,
+    max_tp_pct: float | None = None,
+    target_tp_pct: float | None = None,
 ) -> tuple[float, float, float, float]:
     """Garantiza TP>0 en entradas vol_2x acciones antes de broker/libro."""
     sp = float(stop_price or 0.0)
@@ -131,7 +142,11 @@ def enforce_vol2x_protective(
             f"{symbol} vol_2x: prohibido enviar orden sin stop válido (TP 1:2 requiere SL)"
         )
     cap = DEFAULT_STOCK_MAX_STOP_PCT if max_stop_pct is None else max(0.0, float(max_stop_pct))
-    floor_tp = DEFAULT_STOCK_MIN_TP_PCT if min_tp_pct is None else max(0.0, float(min_tp_pct))
+    tp_min = DEFAULT_STOCK_MIN_TP_PCT if min_tp_pct is None else max(0.0, float(min_tp_pct))
+    tp_max = DEFAULT_STOCK_MAX_TP_PCT if max_tp_pct is None else max(0.0, float(max_tp_pct))
+    tp_target = (
+        DEFAULT_STOCK_TP_TARGET_PCT if target_tp_pct is None else max(0.0, float(target_tp_pct))
+    )
     sp, st_pct = cap_stop_to_max_pct(
         entry_price=ep,
         stop_price=sp,
@@ -139,25 +154,16 @@ def enforce_vol2x_protective(
         symbol=symbol,
         max_stop_pct=cap,
     )
-    tp, tp_pct = compute_rr_take_profit(
-        entry_price=ep,
-        stop_price=sp,
-        qty=qty,
-        symbol=symbol,
-        reward_risk=reward_risk,
-    )
     long = float(qty) >= 0
-    if floor_tp > 0:
-        if long:
-            tp_floor = _round_protective_price(ep * (1.0 + floor_tp), symbol)
-            if tp < tp_floor:
-                tp = tp_floor
-                tp_pct = floor_tp
-        else:
-            tp_floor = _round_protective_price(ep * (1.0 - floor_tp), symbol)
-            if tp > tp_floor:
-                tp = tp_floor
-                tp_pct = floor_tp
+    tp_pct = clamp_tp_pct(tp_target if tp_target > 0 else (tp_min + tp_max) / 2)
+    if tp_max > 0:
+        tp_pct = min(tp_pct, tp_max)
+    if tp_min > 0:
+        tp_pct = max(tp_pct, tp_min)
+    if long:
+        tp = _round_protective_price(ep * (1.0 + tp_pct), symbol)
+    else:
+        tp = _round_protective_price(ep * (1.0 - tp_pct), symbol)
     if tp <= 0:
         raise ValidationError(f"{symbol} vol_2x: take_profit no puede ser 0")
     if not (stop_pct and stop_pct > 0):

@@ -1,14 +1,25 @@
-"""SL/TP por %% en crypto night — misma lógica que acciones vol_2x (tope SL, piso TP)."""
+"""SL/TP/BE crypto night — mismo perfil que acciones (protective_profile)."""
 
 from __future__ import annotations
 
-from strategies.crypto_night.asymmetric_tp import round_crypto_price, take_profit_from_stop
+from bot.risk.protective_profile import (
+    BREAKEVEN_ACTIVATE_PCT,
+    BREAKEVEN_BUFFER_PCT,
+    MAX_STOP_PCT,
+    TP_MAX_PCT,
+    TP_MIN_PCT,
+    TP_TARGET_PCT,
+    clamp_tp_pct,
+)
+from strategies.crypto_night.asymmetric_tp import round_crypto_price
 from strategies.crypto_night.types import TradeSide
 
-DEFAULT_MAX_STOP_PCT = 0.0025
-DEFAULT_MIN_TP_PCT = 0.014
-DEFAULT_BREAKEVEN_ACTIVATE_PCT = 0.007
-DEFAULT_BREAKEVEN_BUFFER_PCT = 0.0005
+DEFAULT_MAX_STOP_PCT = MAX_STOP_PCT
+DEFAULT_MIN_TP_PCT = TP_MIN_PCT
+DEFAULT_MAX_TP_PCT = TP_MAX_PCT
+DEFAULT_TP_TARGET_PCT = TP_TARGET_PCT
+DEFAULT_BREAKEVEN_ACTIVATE_PCT = BREAKEVEN_ACTIVATE_PCT
+DEFAULT_BREAKEVEN_BUFFER_PCT = BREAKEVEN_BUFFER_PCT
 
 
 def _is_long(side: str) -> bool:
@@ -31,18 +42,12 @@ def cap_stop_to_max_pct(
     long = _is_long(side)
     if long:
         risk_pct = (ep - sp) / ep
-        if risk_pct > cap:
-            sp = round_crypto_price(ep * (1.0 - cap), ref=ep)
-            risk_pct = cap
-        elif risk_pct <= 0:
+        if risk_pct > cap or risk_pct <= 0:
             sp = round_crypto_price(ep * (1.0 - cap), ref=ep)
             risk_pct = cap
     else:
         risk_pct = (sp - ep) / ep
-        if risk_pct > cap:
-            sp = round_crypto_price(ep * (1.0 + cap), ref=ep)
-            risk_pct = cap
-        elif risk_pct <= 0:
+        if risk_pct > cap or risk_pct <= 0:
             sp = round_crypto_price(ep * (1.0 + cap), ref=ep)
             risk_pct = cap
     return sp, risk_pct
@@ -56,8 +61,10 @@ def apply_crypto_night_protective(
     reward_risk: float,
     max_stop_pct: float = DEFAULT_MAX_STOP_PCT,
     min_tp_pct: float = DEFAULT_MIN_TP_PCT,
+    max_tp_pct: float = DEFAULT_MAX_TP_PCT,
+    target_tp_pct: float = DEFAULT_TP_TARGET_PCT,
 ) -> tuple[float, float, float, float]:
-    """Devuelve stop, take_profit, stop_pct, tp_pct desde entry."""
+    _ = reward_risk
     ep = float(entry_price)
     side_s = side.value if isinstance(side, TradeSide) else str(side)
     sp, stop_pct = cap_stop_to_max_pct(
@@ -66,26 +73,15 @@ def apply_crypto_night_protective(
         side=side_s,
         max_stop_pct=max_stop_pct,
     )
-    tp_raw = take_profit_from_stop(
-        entry_price=ep,
-        stop_price=sp,
-        side=side_s,
-        reward_risk=reward_risk,
-    )
-    tp = round_crypto_price(tp_raw, ref=ep)
-    tp_pct = abs(tp / ep - 1.0) if ep > 0 and tp > 0 else 0.0
-    floor = max(0.0, float(min_tp_pct))
-    if floor > 0 and ep > 0:
-        if _is_long(side_s):
-            tp_floor = round_crypto_price(ep * (1.0 + floor), ref=ep)
-            if tp < tp_floor:
-                tp = tp_floor
-                tp_pct = floor
-        else:
-            tp_floor = round_crypto_price(ep * (1.0 - floor), ref=ep)
-            if tp > tp_floor:
-                tp = tp_floor
-                tp_pct = floor
+    tp_pct = clamp_tp_pct(target_tp_pct if target_tp_pct > 0 else (min_tp_pct + max_tp_pct) / 2)
+    if max_tp_pct > 0:
+        tp_pct = min(tp_pct, max_tp_pct)
+    if min_tp_pct > 0:
+        tp_pct = max(tp_pct, min_tp_pct)
+    if _is_long(side_s):
+        tp = round_crypto_price(ep * (1.0 + tp_pct), ref=ep)
+    else:
+        tp = round_crypto_price(ep * (1.0 - tp_pct), ref=ep)
     return sp, tp, stop_pct, tp_pct
 
 

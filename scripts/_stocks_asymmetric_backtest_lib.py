@@ -475,6 +475,8 @@ def simulate_trades(
                         symbol=symbol,
                         max_stop_pct=cap,
                     )
+                tp_max = float(getattr(settings, "stock_asymmetric_tp_max_pct", 0.0) or 0.0)
+                tp_tgt = float(getattr(settings, "stock_tp_target_pct", 0.0) or 0.0)
                 _, tp, _, _ = enforce_vol2x_protective(
                     symbol=symbol,
                     side="buy",
@@ -487,6 +489,8 @@ def simulate_trades(
                     take_profit_pct=None,
                     max_stop_pct=cap if cap > 0 else None,
                     min_tp_pct=min_tp if min_tp > 0 else None,
+                    max_tp_pct=tp_max if tp_max > 0 else None,
+                    target_tp_pct=tp_tgt if tp_tgt > 0 else None,
                 )
             except Exception:
                 tp = levels.take_profit_price
