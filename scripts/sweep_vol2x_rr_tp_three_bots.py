@@ -8,6 +8,7 @@ Salida: logs/vol2x_rr_tp_three_bots.csv
 
 from __future__ import annotations
 
+import argparse
 import csv
 import sys
 from datetime import datetime, timezone
@@ -117,44 +118,82 @@ def _run_stock_bot(label: str, symbols: tuple[str, ...], env_file: str) -> list[
     return rows
 
 
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Sweep OOS vol_2x con TP 1:2 (R:R desde SL).")
+    p.add_argument(
+        "--top50-full",
+        action="store_true",
+        help="Solo Top 50 completo (50 tickers); CSV en logs/vol2x_rr_tp_top50_full.csv",
+    )
+    p.add_argument(
+        "--elite-only",
+        action="store_true",
+        help="Solo universo élite (6 tickers).",
+    )
+    p.add_argument(
+        "--skip-crypto-row",
+        action="store_true",
+        help="No añadir fila informativa crypto_night al CSV.",
+    )
+    return p.parse_args()
+
+
 def main() -> int:
-    print("=== Sweep TP 1:2 vol_2x | 3 bots ===", flush=True)
+    args = _parse_args()
+    out_path = OUT
     all_rows: list[dict] = []
 
-    all_rows.extend(_run_stock_bot("elite", ELITE_STOCK_SYMBOLS, ".env.stocks"))
-    all_rows.extend(_run_stock_bot("top50_sample", TOP50_SAMPLE, ".env.stocks_top50"))
+    if args.top50_full:
+        print("=== Sweep TP 1:2 vol_2x | Top 50 completo ===", flush=True)
+        out_path = PROJECT_ROOT / "logs" / "vol2x_rr_tp_top50_full.csv"
+        all_rows.extend(
+            _run_stock_bot(
+                "top50_full",
+                TOP50_US_STOCK_SYMBOLS,
+                ".env.stocks_top50",
+            )
+        )
+    elif args.elite_only:
+        print("=== Sweep TP 1:2 vol_2x | élite ===", flush=True)
+        out_path = PROJECT_ROOT / "logs" / "vol2x_rr_tp_elite.csv"
+        all_rows.extend(_run_stock_bot("elite", ELITE_STOCK_SYMBOLS, ".env.stocks"))
+    else:
+        print("=== Sweep TP 1:2 vol_2x | 3 bots (muestra) ===", flush=True)
+        all_rows.extend(_run_stock_bot("elite", ELITE_STOCK_SYMBOLS, ".env.stocks"))
+        all_rows.extend(_run_stock_bot("top50_sample", TOP50_SAMPLE, ".env.stocks_top50"))
 
-    all_rows.append(
-        {
-            "bot": "crypto_night",
-            "symbol": "BTC/USD,ETH/USD",
-            "scope": "N/A",
-            "trades": 0,
-            "win_rate_pct": 0.0,
-            "profit_factor": 0.0,
-            "return_net_pct": 0.0,
-            "tp_model": "partial@1R+trail (motor crypto_night)",
-            "error": "no usa vol_2x acciones ni RR 1:2 SL",
-        }
-    )
-    print(
-        "crypto_night: motor aparte — TP 50% @1R, trail @2R, time 3h (no RR 1:2 stock)",
-        flush=True,
-    )
+    if not args.skip_crypto_row and not args.top50_full and not args.elite_only:
+        all_rows.append(
+            {
+                "bot": "crypto_night",
+                "symbol": "BTC/USD,ETH/USD",
+                "scope": "N/A",
+                "trades": 0,
+                "win_rate_pct": 0.0,
+                "profit_factor": 0.0,
+                "return_net_pct": 0.0,
+                "tp_model": "asim 2.5R (motor crypto_night; no vol_2x acciones)",
+                "error": "no usa vol_2x acciones ni RR 1:2 SL",
+            }
+        )
+        print(
+            "crypto_night: motor aparte (TP asimétrico crypto; no RR 1:2 stock)",
+            flush=True,
+        )
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     if all_rows:
         keys = list(all_rows[0].keys())
-        with OUT.open("w", newline="", encoding="utf-8") as fh:
+        with out_path.open("w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
             w.writeheader()
             w.writerows(all_rows)
-        print(f"\nCSV: {OUT}", flush=True)
+        print(f"\nCSV: {out_path}", flush=True)
 
     stock_rows = [r for r in all_rows if r.get("bot") != "crypto_night" and not r.get("error")]
     if stock_rows:
         avg_pf = sum(float(r["profit_factor"]) for r in stock_rows) / len(stock_rows)
-        print(f"Media PF OOS acciones (muestra): {avg_pf:.3f}", flush=True)
+        print(f"Media PF OOS acciones: {avg_pf:.3f} ({len(stock_rows)} símbolos)", flush=True)
     else:
         print("Sin filas acciones — calienta data/bars_cache/ en VPS", flush=True)
         return 2
