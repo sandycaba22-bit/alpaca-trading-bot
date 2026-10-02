@@ -15,6 +15,7 @@ import pandas as pd
 from bot.config import Settings
 from bot.strategy.indicators import atr as atr_series
 from bot.strategy.indicators import rsi as rsi_series
+from bot.strategy.noise_gate import check_stock_entry_noise
 
 STRATEGY_TAG = "sync_entry"
 
@@ -94,7 +95,13 @@ class SyncEntryDecision:
     sl_atr_mult: float
 
 
-def _ema_stack_bull(bars: pd.DataFrame, fast: int, slow: int) -> tuple[bool, str]:
+def _ema_stack_bull(
+    bars: pd.DataFrame,
+    fast: int,
+    slow: int,
+    *,
+    require_slope: bool = False,
+) -> tuple[bool, str]:
     if bars.empty or len(bars) < slow + 3:
         return False, "pocas velas HTF"
     close = bars["close"].astype(float)
@@ -109,7 +116,7 @@ def _ema_stack_bull(bars: pd.DataFrame, fast: int, slow: int) -> tuple[bool, str
     slope_ok = es > es_prev
     if c > ef > es and slope_ok:
         return True, f"HTF alcista EMA{fast}>{slow} pendiente+"
-    if c > es and ef > es:
+    if not require_slope and c > es and ef > es:
         return True, f"HTF alcista relajada close>EMA{slow}"
     return False, f"HTF no alcista close={c:.4f} ef={ef:.4f} es={es:.4f}"
 
@@ -192,6 +199,7 @@ def evaluate_sync_entry(
     has_long: bool,
     is_crypto: bool,
     settings: Settings,
+    symbol: str = "",
     now: datetime | None = None,
 ) -> SyncEntryDecision:
     if has_long:
@@ -208,15 +216,25 @@ def evaluate_sync_entry(
     slow = settings.crypto_sma_slow if is_crypto else settings.sma_slow
     slow = max(slow, fast + 2)
 
-    regime_ok, regime_detail = _ema_stack_bull(regime_c, fast, slow)
+    regime_ok, regime_detail = _ema_stack_bull(
+        regime_c, fast, slow, require_slope=not is_crypto
+    )
     if not regime_ok:
-        return SyncEntryDecision(False, f"régimen | {regime_detail}", 0.0, "bear", 0.0)
+        trend = "sideways" if not is_crypto else "bear"
+        return SyncEntryDecision(False, f"régimen | {regime_detail}", 0.0, trend, 0.0)
 
-    confirm_ok, confirm_detail = _ema_stack_bull(confirm_c, fast, slow)
+    confirm_ok, confirm_detail = _ema_stack_bull(
+        confirm_c, fast, slow, require_slope=not is_crypto
+    )
     if not confirm_ok:
         return SyncEntryDecision(
             False, f"confirmación {confirm_tf} | {confirm_detail}", 0.0, "sideways", 0.0
         )
+
+    if not is_crypto:
+        noise_ok, noise_detail = check_stock_entry_noise(symbol, entry_c, settings)
+        if not noise_ok:
+            return SyncEntryDecision(False, noise_detail, 0.0, "sideways", 0.0)
 
     pivot = int(settings.sync_entry_pivot_bars)
     body_min = float(settings.sync_entry_body_min_frac)

@@ -33,7 +33,7 @@ def _htf_bonus(signal: Signal, htf_trend: str | None) -> tuple[float, str | None
     if signal is Signal.BUY and trend == "bull":
         return 25.0, "HTF bull +25"
     if signal is Signal.BUY and trend == "sideways":
-        return 5.0, "HTF lateral +5"
+        return -15.0, "HTF lateral -15"
     if signal is Signal.SELL and trend == "bear":
         return 25.0, "HTF bear +25"
     if signal is Signal.BUY and trend == "bear":
@@ -142,8 +142,8 @@ def score_entry_gate(
             total += 25.0
             parts.append("tendencia bull +25")
         elif trend_key == "sideways":
-            total += 10.0
-            parts.append("tendencia lateral +10")
+            total -= 15.0
+            parts.append("tendencia lateral -15")
         elif trend_key == "bear":
             total -= 25.0
             parts.append("tendencia bear -25")

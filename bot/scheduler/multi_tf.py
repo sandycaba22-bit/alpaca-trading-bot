@@ -27,8 +27,9 @@ from bot.security.exceptions import RateLimitError
 from bot.strategy.base import Signal
 from bot.strategy.entry_score import score_entry_gate
 from bot.strategy.indicators import momentum_pct
+from bot.strategy.noise_gate import check_stock_entry_noise
 from bot.strategy.stock_entry_volume import check_stock_entry_signal_volume
-from bot.strategy.sync_entry import STRATEGY_TAG, evaluate_sync_entry
+from bot.strategy.sync_entry import STRATEGY_TAG, closed_bars_only, evaluate_sync_entry
 from bot.strategy.multi_tf_analysis import (
     MacroSnapshot,
     SpikeSnapshot,
@@ -479,7 +480,7 @@ class MultiTimeframeEngine:
             if trend == "bull":
                 score += 50.0
             elif trend == "sideways":
-                score += 10.0
+                score -= 25.0
             elif trend == "bear":
                 score -= 40.0
             score += float(entry.trend_return_pct or 0.0) * 10.0
@@ -536,6 +537,7 @@ class MultiTimeframeEngine:
             has_long=has_long,
             is_crypto=False,
             settings=settings,
+            symbol=symbol,
         )
 
         cache.trend = decision.htf_trend if decision.htf_trend != "n/a" else cache.trend
@@ -703,6 +705,22 @@ class MultiTimeframeEngine:
             logger.info("%s | HOLD entrada | %s", symbol, detail)
             return
 
+        if signal is Signal.BUY and not is_crypto_symbol(symbol):
+            if str(cache.trend or "").lower() == "sideways":
+                reason = "mercado lateral — entrada omitida"
+                logger.info("%s | BUY filtrada | %s", symbol, reason)
+                cache.signal_detail = f"{detail} | {reason}"
+                engine._notify_signal_filtered(symbol, signal, reason)
+                return
+            closed = closed_bars_only(bars, self._signal_timeframe(symbol))
+            noise_ok, noise_detail = check_stock_entry_noise(symbol, closed, settings)
+            if not noise_ok:
+                logger.info("%s | BUY filtrada | %s", symbol, noise_detail)
+                cache.signal_detail = f"{detail} | {noise_detail}"
+                engine._notify_signal_filtered(symbol, signal, noise_detail)
+                return
+            logger.info("%s | %s", symbol, noise_detail)
+
         if settings.sync_entry_enabled:
             score_min = float(settings.sync_entry_score_min)
         else:
@@ -717,8 +735,7 @@ class MultiTimeframeEngine:
                 return
             logger.info("%s | score entrada OK | %s", symbol, gate_detail)
         filters = engine.signal_filters
-        # SMA y ADX de ruptura ya se aplican en el orquestador / selector de régimen.
-        # No se re-filtran aquí para no duplicar el mismo veto.
+        # ADX, dirección, volumen y eficiencia de acciones ya se vetaron en el filtro de ruido.
 
         if signal is Signal.BUY and not settings.sync_entry_enabled:
             cool = filters.check_cooldown(symbol, bars)
@@ -729,7 +746,7 @@ class MultiTimeframeEngine:
                 return
 
         htf_already_bull = cache.trend == "bull"
-        htf_relaxed = cache.trend in ("bull", "sideways")
+        htf_relaxed = cache.trend == "bull"
         if (
             signal is Signal.BUY
             and settings.entry_confirmation_enabled

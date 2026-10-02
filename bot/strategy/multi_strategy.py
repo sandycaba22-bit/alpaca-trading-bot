@@ -98,17 +98,11 @@ class MultiStrategyOrchestrator(Strategy):
             enabled = (self.force_strategy,)
         candidates: list[StrategyPick] = []
         holds: list[str] = []
-        htf_bull = str(ctx.htf_trend or "").strip().lower() == "bull"
-        trend_relax = regime.regime is MarketRegime.TREND and htf_bull
 
         if StrategyId.BREAKOUT in enabled:
             lookback = self.breakout.lookback_for(ctx.symbol)
             volume_mult = self.breakout.volume_mult_for(ctx.symbol)
             min_range = self.breakout.min_range_mult_for(ctx.symbol)
-            if trend_relax:
-                lookback = max(8, lookback // 2)
-                volume_mult = max(1.0, volume_mult * 0.80)
-                min_range = max(0.25, min_range * 0.80)
             raw, detail = detect_breakout(
                 ctx.bars,
                 lookback=lookback,

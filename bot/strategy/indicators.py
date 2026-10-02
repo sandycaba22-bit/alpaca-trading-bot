@@ -56,11 +56,12 @@ def _plus_minus_dm(bars: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     return plus_dm, minus_dm
 
 
-def adx(bars: pd.DataFrame, period: int = 14) -> pd.Series:
-    """ADX de Wilder (suavizado EWMA con alpha = 1/period)."""
+def dmi(bars: pd.DataFrame, period: int = 14) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """ADX, +DI y -DI de Wilder (suavizado EWMA con alpha = 1/period)."""
+    empty = pd.Series(dtype=float)
     required = {"high", "low", "close"}
     if bars is None or bars.empty or not required.issubset(bars.columns):
-        return pd.Series(dtype=float)
+        return empty, empty, empty
     tr = true_range(bars)
     plus_dm, minus_dm = _plus_minus_dm(bars)
     alpha = 1.0 / period
@@ -71,7 +72,13 @@ def adx(bars: pd.DataFrame, period: int = 14) -> pd.Series:
     minus_di = 100.0 * minus_s / atr_s.replace(0.0, np.nan)
     denom = (plus_di + minus_di).replace(0.0, np.nan)
     dx = 100.0 * (plus_di - minus_di).abs() / denom
-    return dx.ewm(alpha=alpha, adjust=False, min_periods=period).mean()
+    adx_s = dx.ewm(alpha=alpha, adjust=False, min_periods=period).mean()
+    return adx_s, plus_di, minus_di
+
+
+def adx(bars: pd.DataFrame, period: int = 14) -> pd.Series:
+    """ADX de Wilder (suavizado EWMA con alpha = 1/period)."""
+    return dmi(bars, period)[0]
 
 
 def last_adx(bars: pd.DataFrame, period: int = 14) -> float | None:
@@ -80,6 +87,30 @@ def last_adx(bars: pd.DataFrame, period: int = 14) -> float | None:
         return None
     value = float(series.iloc[-1])
     return value if np.isfinite(value) else None
+
+
+def last_dmi(bars: pd.DataFrame, period: int = 14) -> tuple[float, float, float] | None:
+    """Último (ADX, +DI, -DI) válido, o None si no hay histórico."""
+    adx_s, plus_di, minus_di = dmi(bars, period)
+    aligned = pd.concat([adx_s, plus_di, minus_di], axis=1).dropna()
+    if aligned.empty:
+        return None
+    adx_v, plus_v, minus_v = (float(aligned.iloc[-1, i]) for i in range(3))
+    if not (np.isfinite(adx_v) and np.isfinite(plus_v) and np.isfinite(minus_v)):
+        return None
+    return adx_v, plus_v, minus_v
+
+
+def efficiency_ratio(closes: pd.Series, lookback: int = 10) -> float | None:
+    """Recorrido neto / camino. Cerca de 1 es tendencia; cerca de 0 es ruido."""
+    if closes is None or len(closes) < lookback + 1 or lookback < 2:
+        return None
+    window = closes.astype(float).iloc[-(lookback + 1) :]
+    net = abs(float(window.iloc[-1]) - float(window.iloc[0]))
+    path = float(window.diff().abs().iloc[1:].sum())
+    if not np.isfinite(net) or not np.isfinite(path) or path <= 0:
+        return 0.0
+    return net / path
 
 
 def volume_vs_average(

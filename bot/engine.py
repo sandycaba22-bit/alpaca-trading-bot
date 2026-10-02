@@ -379,6 +379,11 @@ class TradingEngine:
                     "Cripto entradas OFF — asimétrico 1H/4H apagado (CRYPTO_ASYMMETRIC_LIVE_ENABLED=false)"
                 )
         if self.settings.bot_profile in {"stocks", "stocks_top50"}:
+            logger.info(
+                "Filtro ruido acciones | ADX mín=%.1f (piso 25) | INTU/CMCSA ADX>=30 vol>=2.2x "
+                "eficiencia>=0.45 | lateral u ADX bajo = entrada omitida | R:R mín=2.5:1",
+                max(self.settings.adx_threshold, 25.0),
+            )
             if (
                 not self.settings.sync_entry_enabled
                 and float(self.settings.stock_entry_signal_volume_mult) > 0

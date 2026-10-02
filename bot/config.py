@@ -172,7 +172,7 @@ class Settings:
     stock_min_stop_pct: float = 0.0
     stock_max_stop_pct: float = 0.0021
     adx_period: int = 14
-    adx_threshold: float = 20.0
+    adx_threshold: float = 25.0
     adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
     adx_filter_enabled: bool = True
     volume_confirmation_period: int = 20
@@ -218,7 +218,7 @@ class Settings:
     sync_entry_body_min_frac: float = 0.55
     sync_entry_rsi_min: float = 52.0
     sync_entry_rsi_max: float = 72.0
-    sync_entry_volume_mult_stock: float = 1.35
+    sync_entry_volume_mult_stock: float = 1.80
     sync_entry_volume_mult_crypto: float = 1.25
     entry_score_macro_penalty: float = 40.0
     entry_score_spike_adverse_penalty: float = 35.0
@@ -426,6 +426,9 @@ def load_settings(env_path: Path | None = None) -> Settings:
                 "o usa otra cuenta Alpaca para élite y Top 50 sin solapamiento"
             )
     crypto_symbols: list[str] = []
+    adx_threshold_overrides = _load_adx_overrides(stock_symbols, crypto_symbols)
+    for _noisy_symbol, _noisy_adx in (("INTU", 30.0), ("CMCSA", 30.0)):
+        adx_threshold_overrides.setdefault(_noisy_symbol, _noisy_adx)
     data_dir = _resolve_data_dir(bot_profile, os.getenv("DATA_DIR"))
     telegram_prefix = _resolve_telegram_prefix(bot_profile, os.getenv("TELEGRAM_PREFIX"))
 
@@ -512,7 +515,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
             os.getenv("STOP_LOSS_PCT"), 0.01, min_value=0.001, max_value=0.25, name="STOP_LOSS_PCT"
         ),
         take_profit_pct=bounded_float(
-            os.getenv("TAKE_PROFIT_PCT"), 0.015, min_value=0.002, max_value=0.50, name="TAKE_PROFIT_PCT"
+            os.getenv("TAKE_PROFIT_PCT"), 0.025, min_value=0.002, max_value=0.50, name="TAKE_PROFIT_PCT"
         ),
         close_on_mode_switch=_as_bool(os.getenv("CLOSE_ON_MODE_SWITCH"), default=True),
         atr_period=bounded_int(os.getenv("ATR_PERIOD"), 14, min_value=5, max_value=50, name="ATR_PERIOD"),
@@ -986,9 +989,9 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         adx_period=bounded_int(os.getenv("ADX_PERIOD"), 14, min_value=5, max_value=50, name="ADX_PERIOD"),
         adx_threshold=bounded_float(
-            os.getenv("ADX_THRESHOLD"), 20.0, min_value=1.0, max_value=80.0, name="ADX_THRESHOLD"
+            os.getenv("ADX_THRESHOLD"), 25.0, min_value=1.0, max_value=80.0, name="ADX_THRESHOLD"
         ),
-        adx_threshold_overrides=_load_adx_overrides(stock_symbols, crypto_symbols),
+        adx_threshold_overrides=adx_threshold_overrides,
         adx_filter_enabled=_as_bool(os.getenv("ADX_FILTER_ENABLED"), default=True),
         volume_confirmation_period=bounded_int(
             os.getenv("VOLUME_CONFIRMATION_PERIOD"),
@@ -1203,7 +1206,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         sync_entry_volume_mult_stock=bounded_float(
             os.getenv("SYNC_ENTRY_VOLUME_MULT_STOCK"),
-            1.35,
+            1.80,
             min_value=1.0,
             max_value=3.0,
             name="SYNC_ENTRY_VOLUME_MULT_STOCK",
@@ -1292,7 +1295,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         dynamic_tp_base_pct=bounded_float(
             os.getenv("DYNAMIC_TP_BASE_PCT"),
-            bounded_float(os.getenv("TAKE_PROFIT_PCT"), 0.015, min_value=0.001, max_value=0.5, name="TAKE_PROFIT_PCT"),
+            bounded_float(os.getenv("TAKE_PROFIT_PCT"), 0.025, min_value=0.001, max_value=0.5, name="TAKE_PROFIT_PCT"),
             min_value=0.001,
             max_value=0.5,
             name="DYNAMIC_TP_BASE_PCT",

@@ -8,6 +8,26 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# Un ganador a TP tiene que valer al menos 2.5 stops. Si el tope de TP
+# no llega, se acorta el stop para que una pérdida no borre varios aciertos.
+MIN_REWARD_RISK = 2.5
+
+
+def _enforce_reward_risk(
+    stop_pct: float,
+    tp_pct: float,
+    max_tp_pct: float,
+) -> tuple[float, float]:
+    if stop_pct <= 0 or tp_pct <= 0:
+        return stop_pct, tp_pct
+    floor = stop_pct * MIN_REWARD_RISK
+    if tp_pct + 1e-12 >= floor:
+        return stop_pct, tp_pct
+    capped = min(max_tp_pct, floor) if max_tp_pct > 0 else floor
+    if capped + 1e-12 < floor:
+        return capped / MIN_REWARD_RISK, capped
+    return stop_pct, capped
+
 
 class ExitReason(str, Enum):
     NONE = "none"
@@ -105,6 +125,18 @@ class StopTakeProfitPolicy:
             stop_pct = max(stop_pct, self.min_stop_pct)
         if self.min_tp_pct > 0:
             tp_pct = max(tp_pct, self.min_tp_pct)
+
+        raw_stop, raw_tp = stop_pct, tp_pct
+        stop_pct, tp_pct = _enforce_reward_risk(stop_pct, tp_pct, self.max_tp_pct)
+        if abs(stop_pct - raw_stop) > 1e-12 or abs(tp_pct - raw_tp) > 1e-12:
+            logger.debug(
+                "R:R ajustado | SL %.3f%% -> %.3f%% | TP %.3f%% -> %.3f%% | mínimo %.1f:1",
+                raw_stop * 100,
+                stop_pct * 100,
+                raw_tp * 100,
+                tp_pct * 100,
+                MIN_REWARD_RISK,
+            )
 
         long = qty >= 0
         if long:
