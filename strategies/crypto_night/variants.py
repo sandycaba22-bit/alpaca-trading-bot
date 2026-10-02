@@ -117,7 +117,7 @@ def find_v2_equal_levels(
     at_ts: pd.Timestamp,
     bias: NightBias,
     vol_ma: pd.Series,
-    hours: int = 8,
+    hours: int = 4,
     *,
     min_volume_ratio: float = 1.5,
 ) -> SweepSetup | None:

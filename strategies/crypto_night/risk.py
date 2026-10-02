@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+# Circuit breaker siempre activo (independiente de CRYPTO_NIGHT_RISK_LIMITS).
+CIRCUIT_BREAKER_CONSECUTIVE_LOSSES = 3
+CIRCUIT_BREAKER_HALT_REASON = "3_losses_consecutivas"
 
 
 @dataclass
@@ -31,12 +35,12 @@ class RiskLimits:
 
 
 def can_open_trade(state: NightRiskState, limits: RiskLimits, *, mode: str) -> tuple[bool, str]:
-    if not limits.limits_enabled:
-        return True, "ok"
     if state.week_halted:
         return False, "kill_switch_semana"
     if state.halted:
         return False, state.halt_reason or "halt_noche"
+    if not limits.limits_enabled:
+        return True, "ok"
     if limits.max_trades_night > 0 and state.trades_tonight >= limits.max_trades_night:
         return False, "max_trades_noche"
     if state.night_pnl_pct <= limits.kill_night_pct:
@@ -47,21 +51,33 @@ def can_open_trade(state: NightRiskState, limits: RiskLimits, *, mode: str) -> t
     return True, "ok"
 
 
+def _apply_consecutive_loss_circuit_breaker(state: NightRiskState, pnl_pct: float) -> None:
+    if pnl_pct < 0:
+        state.consecutive_losses += 1
+    elif pnl_pct > 0:
+        state.consecutive_losses = 0
+    if state.consecutive_losses >= CIRCUIT_BREAKER_CONSECUTIVE_LOSSES:
+        state.halted = True
+        state.halt_reason = CIRCUIT_BREAKER_HALT_REASON
+
+
+def reset_circuit_breaker_for_new_cycle(state: NightRiskState) -> None:
+    """Nuevo día ET: levanta halt por 3 pérdidas y reinicia racha."""
+    state.consecutive_losses = 0
+    if state.halt_reason == CIRCUIT_BREAKER_HALT_REASON:
+        state.halted = False
+        state.halt_reason = ""
+
+
 def register_trade_result(state: NightRiskState, limits: RiskLimits, pnl_pct: float) -> None:
     state.trades_tonight += 1
     state.night_pnl_pct += pnl_pct
     state.week_pnl_pct += pnl_pct
+    _apply_consecutive_loss_circuit_breaker(state, pnl_pct)
     if not limits.limits_enabled:
         return
-    if pnl_pct < 0:
-        state.consecutive_losses += 1
-    else:
-        state.consecutive_losses = 0
     if state.night_pnl_pct <= limits.kill_night_pct:
         state.halted = True
         state.halt_reason = "kill_noche"
     if state.week_pnl_pct <= limits.kill_week_pct:
         state.week_halted = True
-    if state.consecutive_losses >= 2:
-        state.halted = True
-        state.halt_reason = "2_losses_segidas"

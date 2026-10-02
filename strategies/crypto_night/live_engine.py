@@ -7,6 +7,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from types import SimpleNamespace
 
 import pandas as pd
@@ -22,10 +23,13 @@ from strategies.crypto_night.quality import score_setup
 from strategies.crypto_night.exits_live import ExitDecision, current_r, evaluate_exit
 from strategies.crypto_night.position_book import NightTradeRecord, load_trades, save_trades
 from strategies.crypto_night.risk import (
+    CIRCUIT_BREAKER_CONSECUTIVE_LOSSES,
+    CIRCUIT_BREAKER_HALT_REASON,
     NightRiskState,
     RiskLimits,
     can_open_trade,
     register_trade_result,
+    reset_circuit_breaker_for_new_cycle,
 )
 from strategies.crypto_night.session import (
     entries_allowed,
@@ -37,6 +41,10 @@ from strategies.crypto_night.variants import SweepVariant, find_setup_for_varian
 from strategies.crypto_night.volatility import volatility_gate
 
 logger = logging.getLogger("crypto_night")
+
+# Ventana de referencia V1 (min/max de sesión antes del sweep+reclaim en 15m).
+SESSION_LOOKBACK_HOURS = 4
+_ET = ZoneInfo("America/New_York")
 
 
 class CryptoNightEngine:
@@ -68,6 +76,7 @@ class CryptoNightEngine:
         self._state_path = settings.data_dir / "crypto_night_state.json"
         self._trades_path = settings.data_dir / "crypto_night_trades.json"
         self._kill_path = settings.data_dir / "crypto_night_kill_switch.json"
+        self._circuit_breaker_day_et: str = ""
 
     def request_shutdown(self) -> None:
         self._shutdown = True
@@ -96,6 +105,8 @@ class CryptoNightEngine:
             self.risk.halt_reason = str(raw.get("halt_reason", ""))
             self.risk.week_pnl_pct = float(raw.get("week_pnl_pct", 0.0))
             self.risk.week_halted = bool(raw.get("week_halted", False))
+            self.risk.consecutive_losses = int(raw.get("consecutive_losses", 0))
+            self._circuit_breaker_day_et = str(raw.get("circuit_breaker_day_et", ""))
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass
 
@@ -107,12 +118,27 @@ class CryptoNightEngine:
             "halt_reason": self.risk.halt_reason,
             "week_pnl_pct": self.risk.week_pnl_pct,
             "week_halted": self.risk.week_halted,
+            "consecutive_losses": self.risk.consecutive_losses,
+            "circuit_breaker_day_et": self._circuit_breaker_day_et,
             "updated_utc": datetime.now(timezone.utc).isoformat(),
         }
         try:
             self._state_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except OSError as exc:
             logger.warning("No se pudo guardar estado riesgo: %s", exc)
+
+    def _maybe_reset_daily_circuit_breaker(self, now: datetime) -> None:
+        day_et = now.astimezone(_ET).date().isoformat()
+        if self._circuit_breaker_day_et and day_et != self._circuit_breaker_day_et:
+            if self.risk.halted and self.risk.halt_reason == CIRCUIT_BREAKER_HALT_REASON:
+                logger.info(
+                    "Circuit breaker | nuevo día ET %s — se levanta halt por %s",
+                    day_et,
+                    CIRCUIT_BREAKER_HALT_REASON,
+                )
+            reset_circuit_breaker_for_new_cycle(self.risk)
+            self._save_risk_state()
+        self._circuit_breaker_day_et = day_et
 
     def _kill_switch_active(self) -> bool:
         if not self._kill_path.is_file():
@@ -205,6 +231,7 @@ class CryptoNightEngine:
 
     def run_once(self) -> None:
         now = datetime.now(timezone.utc)
+        self._maybe_reset_daily_circuit_breaker(now)
         self._manage_lifecycle(now)
         if self._kill_switch_active():
             logger.info("Kill switch crypto_night activo — sin entradas")
@@ -248,7 +275,7 @@ class CryptoNightEngine:
             if symbol.upper().startswith("BTC"):
                 btc_bias = bias
             vol_ma = bars_15m["volume"].astype(float).rolling(20).mean()
-            session_start = ts - pd.Timedelta(hours=8)
+            session_start = ts - pd.Timedelta(hours=SESSION_LOOKBACK_HOURS)
             setup = self._find_entry_setup(
                 variant,
                 symbol=symbol,
@@ -291,7 +318,14 @@ class CryptoNightEngine:
                 continue
             ok, reason = can_open_trade(self.risk, self.limits, mode="normal")
             if not ok:
-                logger.info("Sin trade | %s", reason)
+                if reason == CIRCUIT_BREAKER_HALT_REASON:
+                    logger.info(
+                        "Sin trade | circuit breaker | %s pérdidas seguidas — "
+                        "entradas pausadas hasta nuevo día ET o reinicio PM2",
+                        self.risk.consecutive_losses,
+                    )
+                else:
+                    logger.info("Sin trade | %s", reason)
                 return
             self._apply_setup_protective(setup)
             self._maybe_place_limit(symbol, setup, bias)
@@ -348,6 +382,17 @@ class CryptoNightEngine:
                         self.settings.dry_run,
                         event_id=f"cn-broker-close|{trade.symbol}|{trade.entry_order_id}",
                     )
+                    register_trade_result(
+                        self.risk,
+                        self.limits,
+                        (pnl_pct / 100.0) if notional > 0 else 0.0,
+                    )
+                    self._save_risk_state()
+                    if self.risk.halted and self.risk.halt_reason == CIRCUIT_BREAKER_HALT_REASON:
+                        logger.warning(
+                            "Circuit breaker activo | %s pérdidas seguidas — sin nuevas entradas",
+                            self.risk.consecutive_losses,
+                        )
                 trade.status = "closed"
                 trade.qty_open = 0.0
                 logger.info("%s | posicion cerrada en broker (stop/fill)", trade.symbol)
@@ -624,11 +669,20 @@ class CryptoNightEngine:
         last_price: float | None = None,
     ) -> None:
         self._market_close(trade, qty, reason)
-        r = 0.0
+        pnl_frac = 0.0
         if last_price is not None and trade.entry_price:
-            r = current_r(trade, last_price)
-        register_trade_result(self.risk, self.limits, r * self.limits.risk_normal_pct)
+            entry_px = float(trade.entry_price)
+            if trade.side == TradeSide.LONG.value:
+                pnl_frac = (last_price - entry_px) / entry_px if entry_px > 0 else 0.0
+            else:
+                pnl_frac = (entry_px - last_price) / entry_px if entry_px > 0 else 0.0
+        register_trade_result(self.risk, self.limits, pnl_frac)
         self._save_risk_state()
+        if self.risk.halted and self.risk.halt_reason == CIRCUIT_BREAKER_HALT_REASON:
+            logger.warning(
+                "Circuit breaker activo | %s pérdidas seguidas — sin nuevas entradas",
+                self.risk.consecutive_losses,
+            )
         trade.qty_open = 0.0
         trade.status = "closed"
         entry = float(trade.entry_price or 0.0)
@@ -808,6 +862,14 @@ class CryptoNightEngine:
             self.settings.tp_reward_risk,
             risk_note,
             flat_note,
+        )
+        logger.info(
+            "Calibracion | ventana sesion %sh | vol setup>=%.2fx | R net>=%.1f | "
+            "circuit breaker %s perdidas seguidas (reset dia ET)",
+            SESSION_LOOKBACK_HOURS,
+            flt.setup_min_volume_ratio,
+            flt.quality_min_theoretical_r,
+            CIRCUIT_BREAKER_CONSECUTIVE_LOSSES,
         )
         logger.info(
             "Salidas live | SL max %.2f%% | TP fijo %.2f–%.2f%% (obj %.2f%%) | "

@@ -55,7 +55,7 @@ RELAXED = CryptoNightFilters(
     quality_max_spread_pct=0.0010,
 )
 
-# Paper/live alto volumen: vol amplia, vol setup 1.1x, calidad mínima 2/5, sin delay post-cierre.
+# Paper/live alto volumen: vol amplia, vol setup 1.05x, calidad mínima 2/5, sin delay post-cierre.
 AGGRESSIVE = CryptoNightFilters(
     vol_pct_low=10.0,
     vol_pct_high=90.0,
@@ -64,11 +64,11 @@ AGGRESSIVE = CryptoNightFilters(
     bias_relaxed_structure=True,
     eth_inherit_btc_bias_only=True,
     entry_delay_minutes_after_us_close=0,
-    setup_min_volume_ratio=1.1,
+    setup_min_volume_ratio=1.05,
     setup_v1_max_bars=14,
     setup_try_v2_fallback=True,
     quality_min_score=2,
-    quality_min_theoretical_r=1.2,
+    quality_min_theoretical_r=1.15,
     quality_max_spread_pct=0.0015,
 )
 
