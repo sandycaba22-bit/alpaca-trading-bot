@@ -43,6 +43,39 @@ def _env_bool(name: str, default: bool) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _last_value_in_env_file(env_path: Path, key: str) -> str | None:
+    """Última aparición de KEY= en el .env (VPS suele acumular líneas duplicadas)."""
+    if not env_path.is_file():
+        return None
+    last: str | None = None
+    try:
+        text = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip().lstrip("\ufeff")
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        if k.strip() == key:
+            last = v.strip().strip('"').strip("'")
+    return last
+
+
+def _env_bool_from_file(env_path: Path, key: str, default: bool) -> bool:
+    raw = _last_value_in_env_file(env_path, key)
+    if raw is None or raw == "":
+        return _env_bool(key, default)
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float_from_file(env_path: Path, key: str, default: float) -> float:
+    raw = _last_value_in_env_file(env_path, key)
+    if raw is None or raw == "":
+        return _env_float(key, default)
+    return float(raw)
+
+
 @dataclass(frozen=True)
 class CryptoNightSettings:
     api_key_id: str
@@ -160,13 +193,22 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         breakeven_buffer_pct=_env_float(
             "CRYPTO_NIGHT_BREAKEVEN_BUFFER_PCT", DEFAULT_BREAKEVEN_BUFFER_PCT
         ),
-        asymmetric_low_vol_mode=_env_bool("CRYPTO_NIGHT_ASYMMETRIC_LOW_VOL_MODE", default=False),
+        asymmetric_low_vol_mode=_env_bool_from_file(
+            env_path, "CRYPTO_NIGHT_ASYMMETRIC_LOW_VOL_MODE", default=False
+        ),
         compression_max_stop_pct=min(
             0.0020,
-            max(0.0015, _env_float("CRYPTO_NIGHT_COMPRESSION_MAX_STOP_PCT", 0.0018)),
+            max(
+                0.0015,
+                _env_float_from_file(env_path, "CRYPTO_NIGHT_COMPRESSION_MAX_STOP_PCT", 0.0018),
+            ),
         ),
-        compression_trail_atr_mult=_env_float("CRYPTO_NIGHT_COMPRESSION_TRAIL_ATR_MULT", 2.0),
-        compression_max_runner_pct=_env_float("CRYPTO_NIGHT_COMPRESSION_MAX_RUNNER_PCT", 0.025),
+        compression_trail_atr_mult=_env_float_from_file(
+            env_path, "CRYPTO_NIGHT_COMPRESSION_TRAIL_ATR_MULT", 2.0
+        ),
+        compression_max_runner_pct=_env_float_from_file(
+            env_path, "CRYPTO_NIGHT_COMPRESSION_MAX_RUNNER_PCT", 0.025
+        ),
         bias_mode=bias_mode,
         filter_profile=filter_profile,
         filters=filters,
