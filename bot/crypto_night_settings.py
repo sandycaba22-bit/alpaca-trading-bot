@@ -75,6 +75,10 @@ class CryptoNightSettings:
     tp_target_pct: float
     breakeven_activate_pct: float
     breakeven_buffer_pct: float
+    asymmetric_low_vol_mode: bool
+    compression_max_stop_pct: float
+    compression_trail_atr_mult: float
+    compression_max_runner_pct: float
 
 
 def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSettings:
@@ -156,6 +160,13 @@ def load_crypto_night_settings(env_path: Path | None = None) -> CryptoNightSetti
         breakeven_buffer_pct=_env_float(
             "CRYPTO_NIGHT_BREAKEVEN_BUFFER_PCT", DEFAULT_BREAKEVEN_BUFFER_PCT
         ),
+        asymmetric_low_vol_mode=_env_bool("CRYPTO_NIGHT_ASYMMETRIC_LOW_VOL_MODE", default=False),
+        compression_max_stop_pct=min(
+            0.0020,
+            max(0.0015, _env_float("CRYPTO_NIGHT_COMPRESSION_MAX_STOP_PCT", 0.0018)),
+        ),
+        compression_trail_atr_mult=_env_float("CRYPTO_NIGHT_COMPRESSION_TRAIL_ATR_MULT", 2.0),
+        compression_max_runner_pct=_env_float("CRYPTO_NIGHT_COMPRESSION_MAX_RUNNER_PCT", 0.025),
         bias_mode=bias_mode,
         filter_profile=filter_profile,
         filters=filters,

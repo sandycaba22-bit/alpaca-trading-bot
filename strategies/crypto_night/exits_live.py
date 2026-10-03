@@ -54,6 +54,10 @@ def take_profit_hit(trade: NightTradeRecord, last_price: float) -> bool:
     return last_price <= tp
 
 
+def _compression_trade(trade: NightTradeRecord) -> bool:
+    return bool(trade.meta.get("compression_mode"))
+
+
 def evaluate_exit(
     trade: NightTradeRecord,
     last_price: float,
@@ -63,6 +67,8 @@ def evaluate_exit(
     breakeven_activate_pct: float = 0.00375,
     breakeven_buffer_pct: float = 0.0,
     trail_offset_pct: float = 0.0021,
+    compression_trail_atr_mult: float = 2.0,
+    compression_max_runner_pct: float = 0.025,
 ) -> ExitDecision:
     if trade.entry_price is None or trade.qty_open <= 0:
         return ExitDecision("hold")
@@ -74,18 +80,42 @@ def evaluate_exit(
     r = current_r(trade, last_price)
     best = max(trade.best_r, r)
 
-    if take_profit_hit(trade, last_price):
-        return ExitDecision(
-            "close_all",
-            close_qty=trade.qty_open,
-            reason="take_profit",
-        )
+    compression = _compression_trade(trade)
+    partial_tp_pct = float(trade.meta.get("compression_partial_tp_pct") or 0.0)
 
     if stop_hit(trade, last_price):
         return ExitDecision(
             "close_all",
             close_qty=trade.qty_open,
             reason="stop",
+        )
+
+    entry = float(trade.entry_price)
+    upnl = unrealized_pct(entry_price=entry, last_price=last_price, side=trade.side)
+
+    if compression and partial_tp_pct > 0 and not trade.partial_taken and upnl >= partial_tp_pct:
+        half = trade.qty_open / 2.0
+        close_qty = half if half > 0 else trade.qty_open
+        return ExitDecision(
+            "partial_1r",
+            close_qty=close_qty,
+            new_runner_stop=trade.runner_stop,
+            reason="compression_partial_tp",
+        )
+
+    if compression and trade.partial_taken and compression_max_runner_pct > 0:
+        if upnl >= float(compression_max_runner_pct):
+            return ExitDecision(
+                "close_all",
+                close_qty=trade.qty_open,
+                reason="compression_expansion_max",
+            )
+
+    if not compression and take_profit_hit(trade, last_price):
+        return ExitDecision(
+            "close_all",
+            close_qty=trade.qty_open,
+            reason="take_profit",
         )
 
     if trade.entry_time_utc:
@@ -109,9 +139,8 @@ def evaluate_exit(
                 reason="time_exit",
             )
 
-    entry = float(trade.entry_price)
-    upnl = unrealized_pct(entry_price=entry, last_price=last_price, side=trade.side)
     be_threshold = max(0.0, float(breakeven_activate_pct))
+    atr_abs = float(trade.meta.get("atr_abs") or 0.0)
 
     if scale_at_1r and not trade.partial_taken and r >= 1.0:
         if be_threshold > 0 and upnl < be_threshold:
@@ -166,6 +195,25 @@ def evaluate_exit(
                     "update_stop",
                     new_runner_stop=be_stop,
                     reason="breakeven_lock",
+                )
+
+    if compression and atr_abs > 0 and upnl >= be_threshold:
+        mult = max(0.5, float(compression_trail_atr_mult))
+        if trade.side == TradeSide.LONG.value:
+            trail = last_price - mult * atr_abs
+            if trail > trade.runner_stop + 1e-12:
+                return ExitDecision(
+                    "update_stop",
+                    new_runner_stop=trail,
+                    reason="compression_trail_atr",
+                )
+        else:
+            trail = last_price + mult * atr_abs
+            if trail < trade.runner_stop - 1e-12:
+                return ExitDecision(
+                    "update_stop",
+                    new_runner_stop=trail,
+                    reason="compression_trail_atr",
                 )
 
     return ExitDecision("hold")

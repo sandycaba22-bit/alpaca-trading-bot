@@ -53,6 +53,31 @@ def cap_stop_to_max_pct(
     return sp, risk_pct
 
 
+DEFAULT_COMPRESSION_MAX_STOP_PCT = 0.0018
+
+
+def apply_compression_protective(
+    *,
+    entry_price: float,
+    stop_price: float,
+    side: str,
+    max_stop_pct: float = DEFAULT_COMPRESSION_MAX_STOP_PCT,
+    partial_tp_pct: float = DEFAULT_TP_TARGET_PCT,
+) -> tuple[float, float, float]:
+    """SL ultratrecho; sin TP fijo en broker (salida por parcial + trail en software)."""
+    ep = float(entry_price)
+    side_s = side.value if isinstance(side, TradeSide) else str(side)
+    cap = min(max(0.0, float(max_stop_pct)), DEFAULT_MAX_STOP_PCT)
+    sp, stop_pct = cap_stop_to_max_pct(
+        entry_price=ep,
+        stop_price=float(stop_price),
+        side=side_s,
+        max_stop_pct=cap,
+    )
+    tp_pct = clamp_tp_pct(partial_tp_pct if partial_tp_pct > 0 else DEFAULT_TP_TARGET_PCT)
+    return sp, stop_pct, tp_pct
+
+
 def apply_crypto_night_protective(
     *,
     entry_price: float,

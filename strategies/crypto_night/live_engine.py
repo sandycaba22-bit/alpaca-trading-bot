@@ -17,7 +17,11 @@ from bot.alpaca.market_data import MarketDataService
 from bot.crypto_night_settings import CryptoNightSettings
 from bot.notify.telegram import TelegramNotifier
 from strategies.crypto_night.asymmetric_tp import round_crypto_price
-from strategies.crypto_night.protective_pct import apply_crypto_night_protective
+from strategies.crypto_night.compression import resolve_entry_volatility
+from strategies.crypto_night.protective_pct import (
+    apply_compression_protective,
+    apply_crypto_night_protective,
+)
 from strategies.crypto_night.bias import resolve_night_bias
 from strategies.crypto_night.quality import score_setup
 from strategies.crypto_night.exits_live import ExitDecision, current_r, evaluate_exit
@@ -38,7 +42,6 @@ from strategies.crypto_night.session import (
 )
 from strategies.crypto_night.types import GateResult, NightBias, TradeSide
 from strategies.crypto_night.variants import SweepVariant, find_setup_for_variant
-from strategies.crypto_night.volatility import volatility_gate
 
 logger = logging.getLogger("crypto_night")
 
@@ -259,23 +262,29 @@ class CryptoNightEngine:
             if bars_15m.empty or bars_1h.empty:
                 continue
             ts = bars_15m.index[-1]
-            vgate, atr_now, _ = volatility_gate(
-                bars_1h,
-                ts,
-                pct_low=flt.vol_pct_low,
-                pct_high=flt.vol_pct_high,
-            )
-            if not vgate.ok:
-                logger.info("%s | candado vol | %s", symbol, vgate.detail)
-                continue
+            session_start = ts - pd.Timedelta(hours=SESSION_LOOKBACK_HOURS)
             bgate, bias = self._resolve_symbol_bias(symbol, bars_4h, bars_1d, btc_bias)
             if not bgate.ok or bias is None:
                 logger.info("%s | candado bias | %s", symbol, bgate.detail)
                 continue
             if symbol.upper().startswith("BTC"):
                 btc_bias = bias
+            vgate, atr_now, compression_mode = resolve_entry_volatility(
+                bars_1h,
+                bars_15m,
+                ts,
+                bias,
+                session_start,
+                pct_low=flt.vol_pct_low,
+                pct_high=flt.vol_pct_high,
+                low_vol_mode=self.settings.asymmetric_low_vol_mode,
+            )
+            if not vgate.ok:
+                logger.info("%s | candado vol | %s", symbol, vgate.detail)
+                continue
+            if compression_mode:
+                logger.info("%s | %s", symbol, vgate.detail)
             vol_ma = bars_15m["volume"].astype(float).rolling(20).mean()
-            session_start = ts - pd.Timedelta(hours=SESSION_LOOKBACK_HOURS)
             setup = self._find_entry_setup(
                 variant,
                 symbol=symbol,
@@ -291,6 +300,8 @@ class CryptoNightEngine:
                     logger.info("%s | candado setup | sin patron V1/V2", symbol)
                 continue
             setup.symbol = symbol
+            setup.meta["compression_mode"] = compression_mode
+            setup.meta["atr_pct"] = float(atr_now or 0.0)
             if len(bars_1h) > 14:
                 setup.atr_1h = float(
                     bars_1h["close"].astype(float).diff().abs().rolling(14).mean().iloc[-1]
@@ -327,8 +338,8 @@ class CryptoNightEngine:
                 else:
                     logger.info("Sin trade | %s", reason)
                 return
-            self._apply_setup_protective(setup)
-            self._maybe_place_limit(symbol, setup, bias)
+            self._apply_setup_protective(setup, compression=compression_mode)
+            self._maybe_place_limit(symbol, setup, bias, compression=compression_mode)
             return
 
     def _active_trades(self) -> list[NightTradeRecord]:
@@ -410,6 +421,8 @@ class CryptoNightEngine:
                 breakeven_activate_pct=self.settings.breakeven_activate_pct,
                 breakeven_buffer_pct=self.settings.breakeven_buffer_pct,
                 trail_offset_pct=self.settings.max_stop_pct,
+                compression_trail_atr_mult=self.settings.compression_trail_atr_mult,
+                compression_max_runner_pct=self.settings.compression_max_runner_pct,
             )
             if decision.action == "hold":
                 continue
@@ -442,23 +455,51 @@ class CryptoNightEngine:
         trade.qty_open = filled_qty
         trade.entry_time_utc = datetime.now(timezone.utc).isoformat()
         trade.status = "open"
-        sp, tp_px, stop_pct, tp_pct = apply_crypto_night_protective(
-            entry_price=fill_px,
-            stop_price=float(trade.stop_price),
-            side=trade.side,
-            reward_risk=self.settings.tp_reward_risk,
-            max_stop_pct=self.settings.max_stop_pct,
-            min_tp_pct=self.settings.min_tp_pct,
-            max_tp_pct=self.settings.max_tp_pct,
-            target_tp_pct=self.settings.tp_target_pct,
-        )
-        trade.stop_price = sp
-        trade.runner_stop = sp
-        trade.take_profit_price = round_crypto_price(tp_px, ref=fill_px)
-        if trade.take_profit_price <= 0:
-            logger.warning("%s | TP asimétrico inválido — no se abre stop/TP broker", trade.symbol)
-            trade.status = "closed"
-            return True
+        compression = bool(trade.meta.get("compression_mode"))
+        if compression:
+            sp, stop_pct, partial_tp_pct = apply_compression_protective(
+                entry_price=fill_px,
+                stop_price=float(trade.stop_price),
+                side=trade.side,
+                max_stop_pct=self.settings.compression_max_stop_pct,
+                partial_tp_pct=self.settings.tp_target_pct,
+            )
+            trade.stop_price = sp
+            trade.runner_stop = sp
+            trade.take_profit_price = 0.0
+            trade.meta["compression_partial_tp_pct"] = partial_tp_pct
+            atr_pct = float(trade.meta.get("atr_pct") or 0.0)
+            trade.meta["atr_abs"] = fill_px * (atr_pct / 100.0) if atr_pct > 0 else float(
+                trade.meta.get("atr_abs") or 0.0
+            )
+            tp_pct = partial_tp_pct
+            logger.info(
+                "%s | fill compresión asimétrica | stop @ %.4f (-%.2f%%) | "
+                "parcial software +%.2f%% | trail ATR x%.1f | sin TP broker",
+                trade.symbol,
+                trade.stop_price,
+                stop_pct * 100,
+                partial_tp_pct * 100,
+                self.settings.compression_trail_atr_mult,
+            )
+        else:
+            sp, tp_px, stop_pct, tp_pct = apply_crypto_night_protective(
+                entry_price=fill_px,
+                stop_price=float(trade.stop_price),
+                side=trade.side,
+                reward_risk=self.settings.tp_reward_risk,
+                max_stop_pct=self.settings.max_stop_pct,
+                min_tp_pct=self.settings.min_tp_pct,
+                max_tp_pct=self.settings.max_tp_pct,
+                target_tp_pct=self.settings.tp_target_pct,
+            )
+            trade.stop_price = sp
+            trade.runner_stop = sp
+            trade.take_profit_price = round_crypto_price(tp_px, ref=fill_px)
+            if trade.take_profit_price <= 0:
+                logger.warning("%s | TP asimétrico inválido — no se abre stop/TP broker", trade.symbol)
+                trade.status = "closed"
+                return True
         if not trade.meta.get("counted_night"):
             self.risk.trades_tonight += 1
             trade.meta["counted_night"] = True
@@ -475,7 +516,8 @@ class CryptoNightEngine:
                 )
             )
             trade.stop_order_id = str(getattr(stop_order, "id", "") or "")
-            self._submit_take_profit_limit(trade)
+            if not compression:
+                self._submit_take_profit_limit(trade)
             logger.info(
                 "%s | entrada fill @ %.4f | stop @ %.4f (-%.2f%%) | TP @ %.4f (+%.2f%%) id=%s",
                 trade.symbol,
@@ -484,7 +526,7 @@ class CryptoNightEngine:
                 stop_pct * 100,
                 trade.take_profit_price,
                 tp_pct * 100,
-                trade.take_profit_order_id or "—",
+                trade.take_profit_order_id or ("compresión/trail" if compression else "—"),
             )
             side = "buy" if trade.side == TradeSide.LONG.value else "sell"
             self.notifier.notify_opened(
@@ -704,21 +746,30 @@ class CryptoNightEngine:
             self.settings.dry_run,
         )
 
-    def _apply_setup_protective(self, setup) -> None:
+    def _apply_setup_protective(self, setup, *, compression: bool = False) -> None:
         side = setup.side.value if hasattr(setup.side, "value") else str(setup.side)
-        sp, _, _, _ = apply_crypto_night_protective(
-            entry_price=float(setup.limit_price),
-            stop_price=float(setup.stop_price),
-            side=side,
-            reward_risk=self.settings.tp_reward_risk,
-            max_stop_pct=self.settings.max_stop_pct,
-            min_tp_pct=self.settings.min_tp_pct,
-            max_tp_pct=self.settings.max_tp_pct,
-            target_tp_pct=self.settings.tp_target_pct,
-        )
+        if compression:
+            sp, _, _ = apply_compression_protective(
+                entry_price=float(setup.limit_price),
+                stop_price=float(setup.stop_price),
+                side=side,
+                max_stop_pct=self.settings.compression_max_stop_pct,
+                partial_tp_pct=self.settings.tp_target_pct,
+            )
+        else:
+            sp, _, _, _ = apply_crypto_night_protective(
+                entry_price=float(setup.limit_price),
+                stop_price=float(setup.stop_price),
+                side=side,
+                reward_risk=self.settings.tp_reward_risk,
+                max_stop_pct=self.settings.max_stop_pct,
+                min_tp_pct=self.settings.min_tp_pct,
+                max_tp_pct=self.settings.max_tp_pct,
+                target_tp_pct=self.settings.tp_target_pct,
+            )
         setup.stop_price = sp
 
-    def _maybe_place_limit(self, symbol: str, setup, bias) -> None:
+    def _maybe_place_limit(self, symbol: str, setup, bias, *, compression: bool = False) -> None:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest
 
@@ -751,8 +802,9 @@ class CryptoNightEngine:
             logger.info("%s | sin trade | qty=0 equity=%.2f", symbol, account.equity)
             return
 
+        mode_tag = "compresion_asimetrica" if compression else "normal"
         logger.info(
-            "Orden limite | client_order_id=%s | %s %s qty=%s @ %.4f SL ref=%.4f variant=%s",
+            "Orden limite | client_order_id=%s | %s %s qty=%s @ %.4f SL ref=%.4f variant=%s | %s",
             cid,
             side.value,
             symbol,
@@ -760,6 +812,7 @@ class CryptoNightEngine:
             setup.limit_price,
             setup.stop_price,
             setup.variant,
+            mode_tag,
         )
         try:
             order = self.client.trading.submit_order(
@@ -785,7 +838,12 @@ class CryptoNightEngine:
                     stop_price=float(setup.stop_price),
                     runner_stop=float(setup.stop_price),
                     status="pending",
-                    meta={"limit_price": float(setup.limit_price), "client_id": cid},
+                    meta={
+                        "limit_price": float(setup.limit_price),
+                        "client_id": cid,
+                        "compression_mode": compression,
+                        "atr_pct": float(setup.meta.get("atr_pct") or 0.0),
+                    },
                 )
             )
             save_trades(self._trades_path, trades)
@@ -871,6 +929,19 @@ class CryptoNightEngine:
             flt.quality_min_theoretical_r,
             CIRCUIT_BREAKER_CONSECUTIVE_LOSSES,
         )
+        if self.settings.asymmetric_low_vol_mode:
+            logger.info(
+                "Compresion asimetrica | ON | SL max %.2f%% | parcial +%.2f%% | "
+                "trail ATR x%.1f | runner max +%.2f%% | candado ATR alto sigue activo",
+                self.settings.compression_max_stop_pct * 100,
+                self.settings.tp_target_pct * 100,
+                self.settings.compression_trail_atr_mult,
+                self.settings.compression_max_runner_pct * 100,
+            )
+        else:
+            logger.info(
+                "Compresion asimetrica | OFF — solo banda ATR normal (CRYPTO_NIGHT_ASYMMETRIC_LOW_VOL_MODE)"
+            )
         logger.info(
             "Salidas live | SL max %.2f%% | TP fijo %.2f–%.2f%% (obj %.2f%%) | "
             "BE en entrada +%.2f%% | scale@1R=%s | time 3h | %s | libro %s",
