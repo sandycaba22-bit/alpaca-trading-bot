@@ -427,7 +427,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
             )
     crypto_symbols: list[str] = []
     adx_threshold_overrides = _load_adx_overrides(stock_symbols, crypto_symbols)
-    for _noisy_symbol, _noisy_adx in (("INTU", 30.0), ("CMCSA", 30.0)):
+    for _noisy_symbol, _noisy_adx in (("INTU", 32.0), ("CMCSA", 32.0)):
         adx_threshold_overrides.setdefault(_noisy_symbol, _noisy_adx)
     data_dir = _resolve_data_dir(bot_profile, os.getenv("DATA_DIR"))
     telegram_prefix = _resolve_telegram_prefix(bot_profile, os.getenv("TELEGRAM_PREFIX"))

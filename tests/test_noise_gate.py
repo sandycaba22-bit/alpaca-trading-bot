@@ -33,13 +33,14 @@ def test_noisy_symbols_use_stricter_limits() -> None:
     aapl = noise_limits("AAPL", settings)
     intu = noise_limits("INTU", settings)
     cmcsa = noise_limits("CMCSA", settings)
-    assert aapl.adx_min == 25.0
-    assert aapl.volume_mult == 1.8
-    assert intu.adx_min == 30.0
-    assert intu.volume_mult == 2.2
-    assert intu.min_efficiency == 0.45
-    assert cmcsa.adx_min == 30.0
-    assert cmcsa.volume_mult == 2.2
+    assert aapl.adx_min == 26.0
+    assert aapl.volume_mult == 1.85
+    assert intu.adx_min == 32.0
+    assert intu.volume_mult == 2.3
+    assert intu.min_efficiency == 0.48
+    assert intu.rsi_max == 62.0
+    assert cmcsa.adx_min == 32.0
+    assert cmcsa.volume_mult == 2.3
 
 
 def test_symbol_override_can_lower_adx() -> None:
@@ -55,9 +56,13 @@ def test_chop_is_rejected() -> None:
     assert "entrada omitida" in reason
 
 
-def test_trend_with_volume_passes() -> None:
+def test_trend_with_volume_passes(monkeypatch) -> None:
     closes = [100.0 + i * 0.45 for i in range(80)]
-    settings = _settings(adx_threshold=25.0, adx_period=14, volume_confirmation_period=20)
+    settings = _settings(adx_threshold=26.0, adx_period=14, volume_confirmation_period=20)
+    monkeypatch.setattr(
+        "bot.strategy.noise_gate.last_rsi",
+        lambda _closes, _period: 55.0,
+    )
     ok, reason = check_stock_entry_noise(
         "AAPL",
         _bars(closes, last_volume=4000.0),
@@ -65,3 +70,16 @@ def test_trend_with_volume_passes() -> None:
     )
     assert ok is True, reason
     assert "ruido OK" in reason
+    assert "RSI 55.0" in reason
+
+
+def test_rsi_overbought_rejected() -> None:
+    closes = [100.0 + i * 0.55 for i in range(80)]
+    settings = _settings(adx_threshold=26.0, adx_period=14, volume_confirmation_period=20)
+    ok, reason = check_stock_entry_noise(
+        "AAPL",
+        _bars(closes, last_volume=5000.0),
+        settings,
+    )
+    assert ok is False
+    assert "RSI" in reason

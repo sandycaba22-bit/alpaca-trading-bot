@@ -12,18 +12,21 @@ from dataclasses import dataclass
 import pandas as pd
 
 from bot.config import Settings
-from bot.strategy.indicators import efficiency_ratio, last_dmi, volume_vs_average
+from bot.strategy.indicators import efficiency_ratio, last_dmi, last_rsi, volume_vs_average
 
 # Piso de tendencia para cualquier acción, aunque ADX_THRESHOLD del entorno sea más bajo.
-STOCK_ADX_FLOOR = 25.0
-STOCK_VOLUME_FLOOR = 1.8
-STOCK_EFFICIENCY_MIN = 0.35
+STOCK_ADX_FLOOR = 26.0
+STOCK_VOLUME_FLOOR = 1.85
+STOCK_EFFICIENCY_MIN = 0.40
 EFFICIENCY_LOOKBACK = 10
+# RSI en vela de entrada: evita comprar rupturas sobrecompradas o sin impulso.
+STOCK_RSI_MIN = 42.0
+STOCK_RSI_MAX = 66.0
 
 # Falsas rupturas frecuentes: más ADX, más volumen y menos camino de ida y vuelta.
 NOISY_BREAKOUT_SYMBOLS: dict[str, dict[str, float]] = {
-    "INTU": {"adx_min": 30.0, "volume_mult": 2.2, "min_efficiency": 0.45},
-    "CMCSA": {"adx_min": 30.0, "volume_mult": 2.2, "min_efficiency": 0.45},
+    "INTU": {"adx_min": 32.0, "volume_mult": 2.3, "min_efficiency": 0.48, "rsi_max": 62.0},
+    "CMCSA": {"adx_min": 32.0, "volume_mult": 2.3, "min_efficiency": 0.48, "rsi_max": 62.0},
 }
 
 
@@ -32,6 +35,8 @@ class NoiseLimits:
     adx_min: float
     volume_mult: float
     min_efficiency: float
+    rsi_min: float
+    rsi_max: float
 
 
 def noise_limits(symbol: str, settings: Settings) -> NoiseLimits:
@@ -46,13 +51,22 @@ def noise_limits(symbol: str, settings: Settings) -> NoiseLimits:
         adx_min = max(base_adx, float(noisy["adx_min"]))
     else:
         adx_min = base_adx
+    rsi_max = float(noisy["rsi_max"]) if noisy and "rsi_max" in noisy else STOCK_RSI_MAX
     if noisy is not None:
         return NoiseLimits(
             adx_min=adx_min,
             volume_mult=max(base_vol, float(noisy["volume_mult"])),
             min_efficiency=float(noisy["min_efficiency"]),
+            rsi_min=STOCK_RSI_MIN,
+            rsi_max=rsi_max,
         )
-    return NoiseLimits(adx_min=adx_min, volume_mult=base_vol, min_efficiency=STOCK_EFFICIENCY_MIN)
+    return NoiseLimits(
+        adx_min=adx_min,
+        volume_mult=base_vol,
+        min_efficiency=STOCK_EFFICIENCY_MIN,
+        rsi_min=STOCK_RSI_MIN,
+        rsi_max=STOCK_RSI_MAX,
+    )
 
 
 def check_stock_entry_noise(
@@ -93,7 +107,18 @@ def check_stock_entry_noise(
         return False, (
             f"ruido eficiencia {eff_txt} < {limits.min_efficiency:.2f} — entrada omitida"
         )
+
+    rsi_period = int(settings.rsi_period)
+    rsi_val = last_rsi(bars["close"], rsi_period)
+    if rsi_val is None:
+        return False, f"ruido RSI no disponible (periodo {rsi_period}) — entrada omitida"
+    if rsi_val < limits.rsi_min or rsi_val > limits.rsi_max:
+        return False, (
+            f"ruido RSI {rsi_val:.1f} fuera [{limits.rsi_min:.0f},{limits.rsi_max:.0f}] "
+            "— entrada omitida"
+        )
+
     return True, (
         f"ruido OK ADX {adx_value:.1f}>{limits.adx_min:.1f} "
-        f"vol {vol_txt} eficiencia {eff:.2f}"
+        f"vol {vol_txt} eficiencia {eff:.2f} RSI {rsi_val:.1f}"
     )

@@ -12,8 +12,9 @@ from bot.risk.protective_profile import (
     TP_TARGET_PCT as PROFILE_TP_TARGET_PCT,
     clamp_tp_pct,
 )
+from bot.risk.stops import MIN_REWARD_RISK
 
-DEFAULT_REWARD_RISK = 2.0
+DEFAULT_REWARD_RISK = MIN_REWARD_RISK
 DEFAULT_STOCK_MAX_STOP_PCT = PROFILE_MAX_STOP_PCT
 DEFAULT_STOCK_MIN_TP_PCT = PROFILE_TP_MIN_PCT
 DEFAULT_STOCK_MAX_TP_PCT = PROFILE_TP_MAX_PCT
@@ -33,6 +34,30 @@ def _round_protective_price(price: float, symbol: str) -> float:
     if price >= 1:
         return round(price, 2)
     return round(price, 4)
+
+
+def _ensure_min_reward_risk_pct(
+    stop_pct: float,
+    tp_pct: float,
+    *,
+    max_tp: float,
+    min_tp: float,
+    min_rr: float = MIN_REWARD_RISK,
+) -> tuple[float, float]:
+    """Garantiza TP/SL >= min_rr (p. ej. 2.5:1) acotando TP o apretando SL."""
+    sp = max(0.0, float(stop_pct))
+    tp = max(0.0, float(tp_pct))
+    if sp <= 0 or tp <= 0:
+        return sp, tp
+    floor_tp = sp * max(0.1, float(min_rr))
+    if tp + 1e-12 >= floor_tp:
+        return sp, tp
+    cap = max_tp if max_tp > 0 else floor_tp
+    new_tp = max(min_tp, min(cap, floor_tp)) if min_tp > 0 else min(cap, floor_tp)
+    if new_tp + 1e-12 >= floor_tp:
+        return sp, new_tp
+    tightened = new_tp / max(0.1, float(min_rr))
+    return tightened, new_tp
 
 
 def is_vol2x_stock_entry_reason(reason: str | None) -> bool:
@@ -160,6 +185,9 @@ def enforce_vol2x_protective(
         tp_pct = min(tp_pct, tp_max)
     if tp_min > 0:
         tp_pct = max(tp_pct, tp_min)
+    st_pct, tp_pct = _ensure_min_reward_risk_pct(
+        st_pct, tp_pct, max_tp=tp_max, min_tp=tp_min
+    )
     if long:
         tp = _round_protective_price(ep * (1.0 + tp_pct), symbol)
     else:
