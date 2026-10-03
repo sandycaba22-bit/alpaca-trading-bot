@@ -381,8 +381,7 @@ class TradingEngine:
         if self.settings.bot_profile in {"stocks", "stocks_top50"}:
             logger.info(
                 "Filtro ruido acciones | ADX piso 26 | RSI 42-66 | INTU/CMCSA ADX>=32 vol>=2.3x "
-                "eficiencia>=0.48 RSI<=62 | lateral omitido | vol_2x R:R mín 2.5:1 en SL/TP",
-                max(self.settings.adx_threshold, 26.0),
+                "eficiencia>=0.48 RSI<=62 | lateral omitido | vol_2x R:R mín 2.5:1 en SL/TP"
             )
             if (
                 not self.settings.sync_entry_enabled
