@@ -299,20 +299,13 @@ class CryptoNightEngine:
                 )
                 if snap is not None and snap.current > snap.pct_ceiling:
                     self._hb_atr_pct = float(snap.current)
-                    if bias.side is not TradeSide.LONG:
-                        logger.info(
-                            "%s | tendencia 4H | señal=hold | bias=%s",
-                            symbol,
-                            bias.side.value,
-                        )
-                        continue
                     setup, trend_msg = evaluate_high_vol_trend(
                         bars_1h,
                         bars_4h,
                         bars_15m,
                         symbol=symbol,
                     )
-                    logger.info("%s | %s", symbol, trend_msg)
+                    logger.info("%s | %s | bias=%s", symbol, trend_msg, bias.side.value)
                     if "señal=buy" in trend_msg:
                         self._hb_signal = "buy"
                     if setup is None:
@@ -831,7 +824,8 @@ class CryptoNightEngine:
         from alpaca.trading.requests import LimitOrderRequest
 
         cid = f"{self.settings.client_order_prefix}{uuid.uuid4().hex[:12]}"
-        side = OrderSide.BUY if bias.side.value == "long" else OrderSide.SELL
+        setup_side = setup.side.value if hasattr(setup.side, "value") else str(setup.side)
+        side = OrderSide.BUY if setup_side == "long" else OrderSide.SELL
         risk_dist = abs(float(setup.limit_price) - float(setup.stop_price))
         if risk_dist <= 0:
             logger.info("%s | sin trade | stop inválido", symbol)
@@ -841,7 +835,7 @@ class CryptoNightEngine:
             logger.info(
                 "DRY_RUN | %s %s limit=%.4f stop=%.4f variant=%s",
                 symbol,
-                bias.side.value,
+                setup_side,
                 setup.limit_price,
                 setup.stop_price,
                 setup.variant,
@@ -887,7 +881,7 @@ class CryptoNightEngine:
             trades.append(
                 NightTradeRecord(
                     symbol=symbol,
-                    side=bias.side.value,
+                    side=setup_side,
                     variant=setup.variant,
                     qty=qty,
                     qty_open=qty,
@@ -987,7 +981,7 @@ class CryptoNightEngine:
             CIRCUIT_BREAKER_CONSECUTIVE_LOSSES,
         )
         logger.info(
-            "Tendencia si ATR alto | 4H cierre > SMA50 | expansion ATR > 1.20x | tag=%s",
+            "Tendencia si ATR alto | 4H cierre > SMA50 | expansion ATR > 1.20x | sin veto de bias | tag=%s",
             "trend_4h_sma50_atr_exp_1.2",
         )
         if self.settings.asymmetric_low_vol_mode:
