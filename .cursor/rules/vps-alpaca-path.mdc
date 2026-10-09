@@ -1,0 +1,22 @@
+---
+description: Exact GCP VM path and PM2 process names for the Alpaca bot
+alwaysApply: true
+---
+
+# VPS path and PM2 names
+
+When giving server commands for this bot, use this path exactly:
+
+`/home/oxowold/alpaca-trading-bot`
+
+SSH host: `oxowold@sandyotvm` (`34.11.113.168`). The user is often already in that shell. Do not prefix commands with another `ssh` to the same machine.
+
+PM2 process names (there is no `trading-web` and no `trading-bot`):
+
+- `crypto-night`
+- `trading-bot-stocks`
+- `trading-web-stocks`
+- `trading-bot-stocks-top50`
+- `trading-web-stocks-top50`
+
+Crypto code changes require `pm2 restart crypto-night --update-env`. Do not restart a process name that is not in this list.
