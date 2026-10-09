@@ -18,6 +18,8 @@ from bot.crypto_night_settings import CryptoNightSettings
 from bot.notify.telegram import TelegramNotifier
 from strategies.crypto_night.asymmetric_tp import round_crypto_price
 from strategies.crypto_night.compression import resolve_entry_volatility
+from strategies.crypto_night.trend_regime import evaluate_high_vol_trend
+from strategies.crypto_night.volatility import volatility_snapshot
 from strategies.crypto_night.protective_pct import (
     apply_compression_protective,
     apply_crypto_night_protective,
@@ -80,6 +82,11 @@ class CryptoNightEngine:
         self._trades_path = settings.data_dir / "crypto_night_trades.json"
         self._kill_path = settings.data_dir / "crypto_night_kill_switch.json"
         self._circuit_breaker_day_et: str = ""
+        self._hb_day = ""
+        self._hb_evals = 0
+        self._hb_signal = "hold"
+        self._hb_atr_pct: float | None = None
+        self._hb_sent_day = ""
 
     def request_shutdown(self) -> None:
         self._shutdown = True
@@ -234,6 +241,7 @@ class CryptoNightEngine:
 
     def run_once(self) -> None:
         now = datetime.now(timezone.utc)
+        self._roll_daily_heartbeat()
         self._maybe_reset_daily_circuit_breaker(now)
         self._manage_lifecycle(now)
         if self._kill_switch_active():
@@ -255,6 +263,8 @@ class CryptoNightEngine:
         variant = self.settings.sweep_variant
         btc_bias = None
         for symbol in self._symbol_scan_order():
+            self._hb_evals += 1
+            self._hb_signal = "hold"
             bars_15m = self._load_bars(symbol, "15Min", 400)
             bars_1h = self._load_bars(symbol, "1Hour", 600)
             bars_4h = self._load_bars(symbol, "4Hour", 400)
@@ -279,22 +289,52 @@ class CryptoNightEngine:
                 pct_high=flt.vol_pct_high,
                 low_vol_mode=self.settings.asymmetric_low_vol_mode,
             )
+            setup = None
             if not vgate.ok:
-                logger.info("%s | candado vol | %s", symbol, vgate.detail)
-                continue
-            if compression_mode:
-                logger.info("%s | %s", symbol, vgate.detail)
-            vol_ma = bars_15m["volume"].astype(float).rolling(20).mean()
-            setup = self._find_entry_setup(
-                variant,
-                symbol=symbol,
-                bars_15m=bars_15m,
-                bars_1d=bars_1d,
-                session_start=session_start,
-                at_ts=ts,
-                bias=bias,
-                vol_ma=vol_ma,
-            )
+                _, snap = volatility_snapshot(
+                    bars_1h,
+                    ts,
+                    pct_low=flt.vol_pct_low,
+                    pct_high=flt.vol_pct_high,
+                )
+                if snap is not None and snap.current > snap.pct_ceiling:
+                    self._hb_atr_pct = float(snap.current)
+                    if bias.side is not TradeSide.LONG:
+                        logger.info(
+                            "%s | tendencia 4H | señal=hold | bias=%s",
+                            symbol,
+                            bias.side.value,
+                        )
+                        continue
+                    setup, trend_msg = evaluate_high_vol_trend(
+                        bars_1h,
+                        bars_4h,
+                        bars_15m,
+                        symbol=symbol,
+                    )
+                    logger.info("%s | %s", symbol, trend_msg)
+                    if "señal=buy" in trend_msg:
+                        self._hb_signal = "buy"
+                    if setup is None:
+                        continue
+                    compression_mode = False
+                else:
+                    logger.info("%s | candado vol | %s", symbol, vgate.detail)
+                    continue
+            if setup is None:
+                if compression_mode:
+                    logger.info("%s | %s", symbol, vgate.detail)
+                vol_ma = bars_15m["volume"].astype(float).rolling(20).mean()
+                setup = self._find_entry_setup(
+                    variant,
+                    symbol=symbol,
+                    bars_15m=bars_15m,
+                    bars_1d=bars_1d,
+                    session_start=session_start,
+                    at_ts=ts,
+                    bias=bias,
+                    vol_ma=vol_ma,
+                )
             if setup is None:
                 if flt.setup_try_v2_fallback:
                     logger.info("%s | candado setup | sin patron V1/V2", symbol)
@@ -302,7 +342,7 @@ class CryptoNightEngine:
             setup.symbol = symbol
             setup.meta["compression_mode"] = compression_mode
             setup.meta["atr_pct"] = float(atr_now or 0.0)
-            if len(bars_1h) > 14:
+            if setup.variant != "trend_4h_sma50_atr_exp_1.2" and len(bars_1h) > 14:
                 setup.atr_1h = float(
                     bars_1h["close"].astype(float).diff().abs().rolling(14).mean().iloc[-1]
                 )
@@ -341,6 +381,23 @@ class CryptoNightEngine:
             self._apply_setup_protective(setup, compression=compression_mode)
             self._maybe_place_limit(symbol, setup, bias, compression=compression_mode)
             return
+
+    def _roll_daily_heartbeat(self) -> None:
+        """Un aviso [CRIPTO] al cambiar el día ET: evaluaciones, última señal, ATR% y que sigue vivo."""
+        today = datetime.now(_ET).date().isoformat()
+        if self._hb_day and self._hb_day != today and self._hb_sent_day != self._hb_day:
+            ratio = f"{self._hb_atr_pct:.3f}" if self._hb_atr_pct is not None else "n/a"
+            text = (
+                f"[CRIPTO] vivo | dia={self._hb_day} | evaluaciones={self._hb_evals} | "
+                f"ultima_senal={self._hb_signal} | atr_pct={ratio}"
+            )
+            logger.info(text)
+            self.notifier._send_event(f"cn-heartbeat|{self._hb_day}", text)
+            self._hb_sent_day = self._hb_day
+            self._hb_evals = 0
+            self._hb_signal = "hold"
+            self._hb_atr_pct = None
+        self._hb_day = today
 
     def _active_trades(self) -> list[NightTradeRecord]:
         return [t for t in load_trades(self._trades_path) if t.status in {"pending", "open"}]
@@ -928,6 +985,10 @@ class CryptoNightEngine:
             flt.setup_min_volume_ratio,
             flt.quality_min_theoretical_r,
             CIRCUIT_BREAKER_CONSECUTIVE_LOSSES,
+        )
+        logger.info(
+            "Tendencia si ATR alto | 4H cierre > SMA50 | expansion ATR > 1.20x | tag=%s",
+            "trend_4h_sma50_atr_exp_1.2",
         )
         if self.settings.asymmetric_low_vol_mode:
             logger.info(
