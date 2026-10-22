@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -24,7 +25,7 @@ ALLOWED_API_HOSTS = frozenset(
 )
 ALLOWED_TIMEFRAMES = frozenset({"1Min", "3Min", "5Min", "6Min", "9Min", "15Min", "1Hour", "1Day"})
 ALLOWED_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
-MAX_SYMBOLS = 8
+MAX_SYMBOLS = 13
 _TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,16}:[A-Za-z0-9_-]{20,120}$")
 _TELEGRAM_CHAT_RE = re.compile(r"^-?\d{5,20}$")
 
@@ -241,9 +242,11 @@ def safe_path_under(base_dir: Path, filename: str) -> Path:
 def sanitize_qty(qty: float, *, fractional: bool = False) -> float:
     if not math.isfinite(qty) or qty <= 0 or qty > 1_000_000:
         raise ValidationError("Cantidad de orden invalida")
-    if fractional:
-        return round(float(qty), 6)
-    return float(qty)
+    precision = Decimal("0.000001") if fractional else Decimal("0.000000001")
+    value = float(Decimal(str(qty)).quantize(precision, rounding=ROUND_DOWN))
+    if value <= 0:
+        raise ValidationError("Cantidad inferior a la precision permitida")
+    return value
 
 
 def _is_telegram_placeholder(value: str) -> bool:

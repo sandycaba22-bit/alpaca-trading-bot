@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from enum import Enum
 
@@ -64,20 +65,22 @@ class StopTakeProfitPolicy:
         last_price: float | None = None,
         atr_value: float | None = None,
     ) -> ProtectiveLevels:
-        ref = last_price if last_price and last_price > 0 else entry_price
+        if not math.isfinite(entry_price) or entry_price <= 0:
+            raise ValueError("Precio de entrada invalido")
+        ref = entry_price
         stop_pct = self.stop_loss_pct
         tp_pct = self.take_profit_pct
         used_atr = False
         trailing_offset = None
 
-        if atr_value and atr_value > 0 and ref > 0:
+        if atr_value and math.isfinite(atr_value) and atr_value > 0:
             sl_pct = (atr_value * self.atr_sl_mult) / ref
             tp_from_atr = (atr_value * self.atr_tp_mult) / ref
             if sl_pct > 0:
-                stop_pct = min(self.max_stop_pct, sl_pct)
+                stop_pct = min(self.max_stop_pct, max(self.stop_loss_pct, sl_pct))
                 used_atr = True
             if tp_from_atr > 0:
-                tp_pct = min(self.max_tp_pct, tp_from_atr)
+                tp_pct = min(self.max_tp_pct, max(self.take_profit_pct, tp_from_atr))
                 used_atr = True
             trailing_offset = atr_value * self.atr_trailing_mult
 
@@ -115,12 +118,12 @@ class StopTakeProfitPolicy:
             return None, "invalid"
         long = qty >= 0
         source = "pct"
-        if atr_value and atr_value > 0:
-            offset = atr_value * self.atr_trailing_mult
+        if atr_value and math.isfinite(atr_value) and atr_value > 0:
+            offset = max(atr_value * self.atr_trailing_mult, peak_price * offset_pct)
             if offset <= 0:
                 return None, "atr_zero"
             if long:
-                if peak_price < entry_price + offset:
+                if peak_price < max(entry_price + offset, entry_price * (1.0 + activate_pct)):
                     return None, "atr_wait"
                 candidate = max(entry_price, peak_price - offset)
             else:

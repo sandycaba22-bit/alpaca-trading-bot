@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_DOWN
 
 from bot.alpaca.client import AccountSnapshot
 from bot.config import Settings
@@ -87,8 +88,10 @@ class RiskManager:
                 f"máximo de posiciones abiertas ({self.settings.max_open_positions})",
             )
 
-        if last_price <= 0:
+        if not math.isfinite(last_price) or last_price <= 0:
             return RiskDecision(False, 0.0, "precio inválido")
+        if not all(math.isfinite(v) and v >= 0 for v in (account.equity, account.buying_power)):
+            return RiskDecision(False, 0.0, "saldo invalido")
 
         cap_notional = min(
             account.equity * self.settings.position_size_pct,
@@ -104,7 +107,7 @@ class RiskManager:
             )
             if qty <= 0:
                 return RiskDecision(False, 0.0, "riesgo fijo no alcanza cantidad mínima")
-            sl_dist = self._stop_distance(last_price, atr_value, atr_sl_mult)
+            sl_dist = self._stop_distance(last_price, atr_value, atr_sl_mult, symbol)
             logger.info(
                 "Riesgo OK | %s BUY qty=%s notional~%.2f | riesgo fijo %.2f%% equity "
                 "| SL dist=%.4f",
@@ -137,11 +140,12 @@ class RiskManager:
         last_price: float,
         atr_value: float | None,
         atr_sl_mult: float | None,
+        symbol: str | None = None,
     ) -> float:
-        sl_mult = float(atr_sl_mult if atr_sl_mult is not None else self.settings.atr_sl_mult)
-        if atr_value and atr_value > 0:
-            return float(atr_value) * sl_mult
-        return last_price * self.settings.stop_loss_pct
+        levels = self.protective_levels(
+            last_price, 1.0, atr_value=atr_value, symbol=symbol, atr_sl_mult=atr_sl_mult
+        )
+        return abs(last_price - levels.stop_price)
 
     def _qty_from_risk(
         self,
@@ -152,7 +156,7 @@ class RiskManager:
         atr_sl_mult: float | None,
         cap_notional: float,
     ) -> float:
-        sl_dist = self._stop_distance(last_price, atr_value, atr_sl_mult)
+        sl_dist = self._stop_distance(last_price, atr_value, atr_sl_mult, symbol)
         if sl_dist <= 0 or last_price <= 0:
             return 0.0
         risk_cash = equity * self.settings.risk_percent_per_trade
@@ -166,8 +170,11 @@ class RiskManager:
 
     @staticmethod
     def _normalize_qty(symbol: str, qty: float) -> float:
+        if not math.isfinite(qty) or qty <= 0:
+            return 0.0
+        qty = min(qty, 1_000_000.0)
         if is_crypto_symbol(symbol):
-            qty = round(float(qty), 6)
+            qty = float(Decimal(str(qty)).quantize(Decimal("0.000001"), rounding=ROUND_DOWN))
             return qty if qty >= 0.0001 else 0.0
         qty = math.floor(float(qty))
         return float(qty) if qty >= 1 else 0.0

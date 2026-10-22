@@ -144,6 +144,8 @@ class TradingEngine:
         self._tick_lock = threading.Lock()
         self._pending_lock = threading.Lock()
         self._pending: dict[str, PendingExecution] = {}
+        self._closing_lock = threading.Lock()
+        self._closing_in_flight: set[str] = set()
         self._last_fill_poll = 0.0
         self.breakout_state = BreakoutStateStore()
         self.signal_filters = SignalFilterLayer(settings, self.breakout_state)
@@ -508,8 +510,11 @@ class TradingEngine:
                 self._reconcile_book_qty_from_broker(row.symbol)
             elif row.side.lower() == "buy" and not row.is_close:
                 self._on_buy_filled(row.symbol)
-        terminal_dead = any(token in status.lower() for token in ("cancel", "expir", "done_for_day"))
+        terminal_dead = status.lower() in {"canceled", "cancelled", "expired", "done_for_day"}
         if kind == "filled":
+            if row.is_close and not row.reason.startswith("dynamic_tp"):
+                if self.executor.get_position(row.symbol) is not None:
+                    return
             self._finalize_resting_fill(row, fill_price, filled_qty)
             self.executor.pending_fills.remove(row.order_id)
             return
@@ -818,6 +823,22 @@ class TradingEngine:
             self._retry_pending(pending)
 
     def _retry_pending(self, pending: PendingExecution) -> None:
+        key = normalize_symbol(pending.symbol)
+        with self._closing_lock:
+            if key in self._closing_in_flight:
+                return
+            self._closing_in_flight.add(key)
+        try:
+            self._submit_retry_pending(pending)
+        finally:
+            with self._closing_lock:
+                self._closing_in_flight.discard(key)
+
+    def _submit_retry_pending(self, pending: PendingExecution) -> None:
+        if self.executor.pending_fills.has_close(pending.symbol):
+            with self._pending_lock:
+                self._pending.pop(pending.symbol.upper(), None)
+            return
         settings = self.settings
         now = time.monotonic()
         elapsed = now - pending.first_at
@@ -954,6 +975,14 @@ class TradingEngine:
         if pending.is_close:
             filled_qty = float(result.filled_qty or pending.qty)
             entry = float(pending.entry_price or fill_price)
+            if not self.executor.dry_run and self.executor.get_position(pending.symbol) is not None:
+                self._watch_resting(
+                    result, symbol=pending.symbol, side=pending.side,
+                    qty=pending.qty, reason=pending.reason, is_close=True,
+                    event_id=pending.event_id, entry_price=entry,
+                    signal_price=pending.signal_price or last_price,
+                )
+                return
             snap = compute_pnl(
                 pending.symbol, filled_qty, entry, fill_price, PnLEvent.CLOSED
             )
@@ -1007,6 +1036,8 @@ class TradingEngine:
         if not self._running or self.control.is_paused():
             return
         if tick_price <= 0:
+            return
+        if self._is_closing(symbol):
             return
         if not self._tick_lock.acquire(blocking=False):
             return
@@ -1103,6 +1134,8 @@ class TradingEngine:
         clock: MarketClockView,
         atr_value: float | None = None,
     ) -> None:
+        if self._is_closing(symbol):
+            return
         tracked = self.executor.position_book.get(symbol)
         if tracked is None or qty <= 0 or entry <= 0:
             return
@@ -1182,13 +1215,6 @@ class TradingEngine:
         if not is_symbol_tradable(symbol, clock):
             logger.info("%s | %s detectado pero mercado cerrado para acciones", symbol, reason.value)
             return
-        if self.executor.pending_fills.has_close(symbol):
-            logger.info(
-                "%s | %s detectado pero hay orden de cierre en vuelo — no se reenvía",
-                symbol,
-                reason.value,
-            )
-            return
         self._close_and_report(symbol, qty, entry, last_price, reason.value)
 
     def _mark_all_positions(self) -> None:
@@ -1262,6 +1288,8 @@ class TradingEngine:
         signal: Signal,
         atr_sl_mult: float | None = None,
     ) -> None:
+        if self._is_closing(symbol):
+            return
         qty = float(position.qty) if position is not None else 0.0
         atr_value = self._remember_atr(symbol, last_atr(bars, self.settings.atr_period))
         bid, ask, spread = self._live_quote(symbol, tape)
@@ -1340,6 +1368,7 @@ class TradingEngine:
                 decision.qty,
                 OrderSide.BUY,
                 price=last_price,
+                entry_price=last_price,
                 reason="signal_6m",
                 stop_price=levels.stop_price,
                 take_profit_price=levels.take_profit_price,
@@ -1361,6 +1390,7 @@ class TradingEngine:
                         qty=decision.qty,
                         reason="signal_6m",
                         last_price=last_price,
+                        entry_price=last_price,
                         is_close=False,
                         attempts=1,
                         first_at=time.monotonic(),
@@ -1537,6 +1567,17 @@ class TradingEngine:
             )
         )
 
+    def _is_closing(self, symbol: str) -> bool:
+        key = normalize_symbol(symbol)
+        with self._closing_lock:
+            if key in self._closing_in_flight:
+                return True
+        if self.executor.pending_fills.has_close(key):
+            return True
+        with self._pending_lock:
+            pending = self._pending.get(key)
+            return bool(pending and pending.is_close)
+
     def _close_and_report(
         self,
         symbol: str,
@@ -1545,17 +1586,32 @@ class TradingEngine:
         last_price: float,
         reason: str,
     ) -> bool:
+        symbol = normalize_symbol(symbol)
+        if self._is_closing(symbol):
+            return False
+        with self._closing_lock:
+            if symbol in self._closing_in_flight:
+                return False
+            self._closing_in_flight.add(symbol)
+        try:
+            return self._submit_close_and_report(symbol, qty, entry_price, last_price, reason)
+        finally:
+            with self._closing_lock:
+                self._closing_in_flight.discard(symbol)
+
+    def _submit_close_and_report(
+        self,
+        symbol: str,
+        qty: float,
+        entry_price: float,
+        last_price: float,
+        reason: str,
+    ) -> bool:
         logger.info("%s | cerrando por %s @ %.4f (entry %.4f)", symbol, reason, last_price, entry_price)
+        if self.executor.pending_fills.has_close(symbol):
+            return False
         if self.settings.dynamic_tp_enabled:
             self.dynamic_tp.cancel_for_symbol(self, symbol)
-        if self.executor.pending_fills.has_close(symbol):
-            existing = self.executor.pending_fills.close_for(symbol)
-            logger.info(
-                "%s | cierre ya en vuelo | id=%s — no se reenvía",
-                symbol,
-                existing.order_id if existing else "—",
-            )
-            return False
         tracked = self.executor.position_book.get(symbol)
         signal_ts = str(getattr(tracked, "opened_at", "") or "") if tracked is not None else ""
         if not signal_ts:
@@ -1612,7 +1668,7 @@ class TradingEngine:
                 )
             )
             return False
-        if not result.filled:
+        if result is not None and not result.filled:
             self._watch_resting(
                 result,
                 symbol=symbol,
@@ -1634,6 +1690,13 @@ class TradingEngine:
         if tracked is not None:
             ref_qty = float(tracked.opened_qty or qty)
         remaining_eff = effective_qty(self.settings, symbol, remaining, ref_qty)
+        if result is not None and result.filled and remaining > 0 and filled_qty + 1e-8 >= qty:
+            self._watch_resting(
+                result, symbol=symbol, side="sell", qty=qty, reason=reason,
+                is_close=True, event_id=event_id, entry_price=entry_price,
+                signal_price=last_price,
+            )
+            return False
         if remaining_eff > 1e-8 and filled_qty + 1e-8 < qty:
             snap = compute_pnl(symbol, filled_qty, entry_price, fill_price, PnLEvent.CLOSED)
             self.reporter.emit(snap)

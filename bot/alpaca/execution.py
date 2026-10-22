@@ -143,7 +143,7 @@ def classify_order(order: Any) -> str:
     ).strip()
     if "reject" in status:
         return "failed"
-    terminal_dead = any(token in status for token in ("cancel", "expir", "done_for_day"))
+    terminal_dead = status in {"canceled", "cancelled", "expired", "done_for_day"}
     if terminal_dead:
         if remaining <= 1e-9 and filled > 0:
             return "filled"
@@ -242,14 +242,17 @@ class OrderExecutor:
             return self.client.trading.get_open_position(symbol)
         except ValidationError:
             raise
-        except Exception:
+        except APIError as exc:
+            if exc.status_code != 404:
+                raise
             compact = symbol.replace("/", "")
             if compact != symbol:
+                self.client.limiter.acquire("trading_read")
                 try:
-                    self.client.limiter.acquire("trading_read")
                     return self.client.trading.get_open_position(compact)
-                except Exception:
-                    pass
+                except APIError as compact_exc:
+                    if compact_exc.status_code != 404:
+                        raise
             return None
 
     def list_positions(self) -> list[Position | SimpleNamespace]:
@@ -355,6 +358,8 @@ class OrderExecutor:
 
         order_type = "limit" if use_limit else "market"
         tif = time_in_force_for(symbol, use_limit=use_limit, stock_tif=time_in_force)
+        if not is_crypto_symbol(symbol) and not qty.is_integer():
+            tif = TimeInForce.DAY
 
         try:
             self.client.limiter.acquire("order")
@@ -630,14 +635,22 @@ class OrderExecutor:
         if side is OrderSide.BUY and fill_price > 0:
             existing = self.position_book.get(symbol)
             if existing is None:
+                stop_distance = (
+                    abs(float(entry_price) - float(stop_price))
+                    if entry_price and stop_price else fill_price * float(stop_pct or 0.01)
+                )
+                tp_distance = (
+                    abs(float(take_profit_price) - float(entry_price))
+                    if entry_price and take_profit_price else fill_price * float(take_profit_pct or 0.015)
+                )
                 self.position_book.open(
                     symbol,
                     qty,
                     fill_price,
-                    stop_price=float(stop_price or fill_price * 0.99),
-                    take_profit_price=float(take_profit_price or fill_price * 1.015),
-                    stop_pct=float(stop_pct or 0.01),
-                    take_profit_pct=float(take_profit_pct or 0.015),
+                    stop_price=fill_price - stop_distance,
+                    take_profit_price=fill_price + tp_distance,
+                    stop_pct=stop_distance / fill_price,
+                    take_profit_pct=tp_distance / fill_price,
                     dry_run=dry_run,
                 )
             else:
@@ -670,6 +683,8 @@ class OrderExecutor:
         attempt: int = 1,
     ) -> OrderSubmitResult | None:
         symbol = normalize_symbol(sanitize_symbol(symbol))
+        if self.pending_fills.has_close(symbol):
+            return None
         position = self.get_position(symbol)
         if position is None:
             logger.info("No hay posicion abierta en %s", symbol)

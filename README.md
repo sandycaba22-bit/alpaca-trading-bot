@@ -4,6 +4,32 @@ Bot modular en Python integrado con la API de Alpaca Markets (solo paper trading
 
 Incluye cruce SMA, P&L verde/rojo por operación, stop/take-profit dinámicos, filtro de flujo de precios en vivo, walk-forward 3+3 años y avisos de Telegram.
 
+## Universo y ejecucion
+
+El universo de nuevas entradas es fijo: AAPL, MSFT, NVDA, AMZN, GOOGL,
+META, JNJ, JPM, PG, XOM, V, HD y UNH. `SYMBOLS` y `CRYPTO_SYMBOLS`
+no cambian esta lista. No se abren posiciones cripto ni entradas fuera de
+la sesion regular US; no se ha habilitado la sesion overnight de Alpaca.
+Las posiciones existentes siguen bajo gestion del motor.
+
+Defaults: `BREAKOUT_VOLUME_MULT=1.45` y `ADX_THRESHOLD=24.0`.
+Los valores anteriores 1.85 y 26.0 se migran al cargar la configuracion,
+tambien en overrides por simbolo; otros valores personalizados se conservan.
+
+El cierre se bloquea por simbolo antes del envio. Una orden aceptada o
+`pending_cancel` sigue en vuelo; los errores de consulta no confirman cierre.
+Una cancelacion/rechazo terminal permite otro intento si queda posicion.
+SL/TP usan distancias ancladas a la entrada y el sizing usa esa misma
+distancia de SL. Los porcentajes configurados son pisos frente a ATR diminuto;
+la cantidad cripto se trunca, las entradas de acciones usan lotes enteros
+y los cierres preservan hasta nueve decimales en acciones.
+
+Pruebas offline, sin credenciales ni ordenes al broker:
+
+```bash
+python -m unittest discover -v
+```
+
 ## Arranque rápido
 
 ```bash

@@ -15,7 +15,6 @@ from bot.security.sanitize import (
     sanitize_api_base_url,
     sanitize_log_level,
     sanitize_symbols,
-    sanitize_crypto_symbols,
     sanitize_telegram_chat_id,
     sanitize_telegram_token,
     sanitize_timeframe,
@@ -25,6 +24,10 @@ from bot.security.sanitize import (
 from bot.security.secrets import register_secret
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+STOCK_UNIVERSE = (
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "JNJ",
+    "JPM", "PG", "XOM", "V", "HD", "UNH",
+)
 
 
 def _default_dust_cache():
@@ -95,7 +98,7 @@ class Settings:
     atr_tp_mult: float = 3.0
     atr_trailing_mult: float = 2.0
     adx_period: int = 14
-    adx_threshold: float = 20.0
+    adx_threshold: float = 24.0
     adx_threshold_overrides: dict[str, float] = field(default_factory=dict)
     adx_filter_enabled: bool = True
     volume_confirmation_period: int = 20
@@ -106,7 +109,7 @@ class Settings:
     telegram_notify_filtered: bool = False
     breakout_lookback_periods: int = 20
     breakout_lookback_overrides: dict[str, int] = field(default_factory=dict)
-    breakout_volume_mult: float = 1.5
+    breakout_volume_mult: float = 1.45
     breakout_volume_mult_overrides: dict[str, float] = field(default_factory=dict)
     breakout_min_range_atr_mult: float = 0.5
     breakout_min_range_overrides: dict[str, float] = field(default_factory=dict)
@@ -196,10 +199,8 @@ def load_settings(env_path: Path | None = None) -> Settings:
             "No se arranca para evitar mezclar cuentas"
         )
 
-    stock_symbols = sanitize_symbols(os.getenv("SYMBOLS"), ["AAPL"])
-    crypto_symbols = sanitize_crypto_symbols(
-        os.getenv("CRYPTO_SYMBOLS"), ["BTC/USD", "ETH/USD"]
-    )
+    stock_symbols = sanitize_symbols(list(STOCK_UNIVERSE))
+    crypto_symbols: list[str] = []
 
     settings = Settings(
         api_key_id=api_key,
@@ -348,7 +349,8 @@ def load_settings(env_path: Path | None = None) -> Settings:
         ),
         adx_period=bounded_int(os.getenv("ADX_PERIOD"), 14, min_value=5, max_value=50, name="ADX_PERIOD"),
         adx_threshold=bounded_float(
-            os.getenv("ADX_THRESHOLD"), 20.0, min_value=1.0, max_value=80.0, name="ADX_THRESHOLD"
+            _migrate_threshold("ADX_THRESHOLD", 26.0, 24.0), 24.0,
+            min_value=1.0, max_value=80.0, name="ADX_THRESHOLD"
         ),
         adx_threshold_overrides=_load_adx_overrides(stock_symbols, crypto_symbols),
         adx_filter_enabled=_as_bool(os.getenv("ADX_FILTER_ENABLED"), default=True),
@@ -388,8 +390,8 @@ def load_settings(env_path: Path | None = None) -> Settings:
             max_value=200,
         ),
         breakout_volume_mult=bounded_float(
-            os.getenv("BREAKOUT_VOLUME_MULT"),
-            1.5,
+            _migrate_threshold("BREAKOUT_VOLUME_MULT", 1.85, 1.45),
+            1.45,
             min_value=0.5,
             max_value=8.0,
             name="BREAKOUT_VOLUME_MULT",
@@ -604,6 +606,16 @@ def _load_adx_overrides(stock_symbols: list[str], crypto_symbols: list[str]) -> 
     )
 
 
+def _migrate_threshold(name: str, old: float, new: float) -> str | None:
+    raw = os.getenv(name)
+    try:
+        if raw is not None and float(raw) == old:
+            return str(new)
+    except ValueError:
+        pass
+    return raw
+
+
 def _load_float_overrides(
     map_env: str,
     prefix: str,
@@ -627,6 +639,10 @@ def _load_float_overrides(
         overrides[str(symbol).upper()] = bounded_float(
             raw, min_value, min_value=min_value, max_value=max_value, name=env_name
         )
+    if map_env == "ADX_THRESHOLD_OVERRIDES":
+        overrides = {key: 24.0 if value == 26.0 else value for key, value in overrides.items()}
+    elif map_env == "BREAKOUT_VOLUME_MULT_OVERRIDES":
+        overrides = {key: 1.45 if value == 1.85 else value for key, value in overrides.items()}
     return overrides
 
 

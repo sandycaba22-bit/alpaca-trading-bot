@@ -160,10 +160,19 @@ class OpenPositionBook:
             return pos
         old_qty = abs(float(pos.qty))
         new_qty = old_qty + abs(float(qty))
+        stop_distance = abs(pos.avg_entry_price - pos.stop_price)
+        tp_distance = abs(pos.take_profit_price - pos.avg_entry_price)
         pos.avg_entry_price = (
             (pos.avg_entry_price * old_qty) + (float(fill_price) * abs(float(qty)))
         ) / new_qty
         pos.qty = new_qty if pos.qty >= 0 else -new_qty
+        pos.opened_qty = new_qty
+        if pos.qty > 0:
+            if not pos.trailing_notified:
+                pos.stop_price = pos.avg_entry_price - stop_distance
+            pos.take_profit_price = pos.avg_entry_price + tp_distance
+            pos.stop_pct = abs(pos.avg_entry_price - pos.stop_price) / pos.avg_entry_price
+            pos.take_profit_pct = tp_distance / pos.avg_entry_price
         self.save()
         return pos
 

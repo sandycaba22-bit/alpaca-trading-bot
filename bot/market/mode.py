@@ -15,6 +15,8 @@ class TradingMode(str, Enum):
 
 def resolve_trading_mode(clock: MarketClockView, settings: Settings) -> tuple[TradingMode, list[str]]:
     """Acciones cuando el mercado US está abierto; cripto en cierre, noches y fines de semana."""
+    if not settings.crypto_symbols:
+        return TradingMode.STOCKS, list(settings.stock_symbols) if clock.is_open else []
     if clock.is_open:
         return TradingMode.STOCKS, list(settings.stock_symbols)
     return TradingMode.CRYPTO, list(settings.crypto_symbols)
